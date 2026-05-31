@@ -21,21 +21,24 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 // OTHER DEALINGS IN THE SOFTWARE.
 
-#pragma once
-#include <msctf.h>
-#include <windows.h>
+#ifndef BOPOMOFO_BRAILLE_BRAILLETYPE_H_
+#define BOPOMOFO_BRAILLE_BRAILLETYPE_H_
 
-extern HINSTANCE g_hInst;
-extern LONG g_cRefDll;
+namespace McBopomofo {
 
-void DllAddRef();
-void DllRelease();
+/**
+ * Selects which braille encoding to produce or parse.
+ *
+ * `UNICODE` uses braille Unicode code points such as `⠓`, while `ASCII`
+ * uses the legacy ASCII braille notation exposed by some assistive tooling.
+ */
+enum class BrailleType {
+  /** Unicode braille cells such as `⠁`. */
+  UNICODE = 0,
+  /** ASCII braille symbols such as `a` or `#`. */
+  ASCII = 1,
+};
 
-void LogMessage(const char* format, ...);
-void LogMessageFileOnly(const char* format, ...);
+}  // namespace McBopomofo
 
-float GetDpiScaleForWindow(HWND hwnd);
-
-void EnableWindowDropShadow(HWND hwnd);
-
-bool ShouldUseGdiRendererForHost(HWND hwnd);
+#endif  // BOPOMOFO_BRAILLE_BRAILLETYPE_H_

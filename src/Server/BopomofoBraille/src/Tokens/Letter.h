@@ -21,21 +21,56 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 // OTHER DEALINGS IN THE SOFTWARE.
 
-#pragma once
-#include <msctf.h>
-#include <windows.h>
+#ifndef SRC_TOKENS_LETTER_H_
+#define SRC_TOKENS_LETTER_H_
 
-extern HINSTANCE g_hInst;
-extern LONG g_cRefDll;
+#include <optional>
+#include <string>
+#include <vector>
 
-void DllAddRef();
-void DllRelease();
+#include "BopomofoBraille/BrailleType.h"
 
-void LogMessage(const char* format, ...);
-void LogMessageFileOnly(const char* format, ...);
+namespace McBopomofo {
 
-float GetDpiScaleForWindow(HWND hwnd);
+enum class Letter {
+  a = 'a',
+  b = 'b',
+  c = 'c',
+  d = 'd',
+  e = 'e',
+  f = 'f',
+  g = 'g',
+  h = 'h',
+  i = 'i',
+  j = 'j',
+  k = 'k',
+  l = 'l',
+  m = 'm',
+  n = 'n',
+  o = 'o',
+  p = 'p',
+  q = 'q',
+  r = 'r',
+  s = 's',
+  t = 't',
+  u = 'u',
+  v = 'v',
+  w = 'w',
+  x = 'x',
+  y = 'y',
+  z = 'z'
+};
 
-void EnableWindowDropShadow(HWND hwnd);
+namespace LetterWrapper {
+std::optional<Letter> fromLetter(const std::string& b);
+std::optional<Letter> fromBraille(const std::string& b,
+                                  BrailleType type = BrailleType::UNICODE);
+std::optional<Letter> fromBrailleCode(const std::string& b);
+std::string toLetter(Letter c);
+std::string toBraille(Letter c, BrailleType type = BrailleType::UNICODE);
+std::string toBrailleCode(Letter c);
+}  // namespace LetterWrapper
 
-bool ShouldUseGdiRendererForHost(HWND hwnd);
+}  // namespace McBopomofo
+
+#endif  // SRC_TOKENS_LETTER_H_
