@@ -64,6 +64,26 @@ COLORREF ToColorRef(uint32_t rgb) {
   return RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
 }
 
+bool IsSystemColorSettingsChange(UINT msg, LPARAM lParam) {
+  if (msg == WM_DWMCOLORIZATIONCOLORCHANGED || msg == WM_THEMECHANGED ||
+      msg == WM_SYSCOLORCHANGE) {
+    return true;
+  }
+  if (msg != WM_SETTINGCHANGE) {
+    return false;
+  }
+
+  if (lParam == 0) {
+    return true;
+  }
+
+  const auto area = reinterpret_cast<LPCWSTR>(lParam);
+  return wcscmp(area, L"ImmersiveColorSet") == 0 ||
+         wcscmp(area, L"WindowsThemeElement") == 0 ||
+         wcscmp(area, L"UserPreferences") == 0 ||
+         wcscmp(area, L"Policy") == 0;
+}
+
 bool IsEmojiCodePoint(char32_t cp) {
   return (cp >= 0x1F300 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) ||
          (cp >= 0xFE00 && cp <= 0xFE0F);
@@ -383,6 +403,9 @@ void CandidateWindow::applyCandidateWindowSettings_(
 }
 
 void CandidateWindow::reloadServerControlledSettings_() {
+#ifdef WINMCBOPOMOFO_SERVER_SIDE_POPUP
+  InvalidateRect(hwnd_, nullptr, FALSE);
+#else
   McBopomofo::IPC::NamedPipeClient pipe(McBopomofo::IPC::PIPE_NAME);
   std::string response;
   if (!pipe.Call(McBopomofo::IPC::SerializeReloadSettings(), response)) {
@@ -398,6 +421,7 @@ void CandidateWindow::reloadServerControlledSettings_() {
                                 state.candidateKeys, state.candidateKeysCount,
                                 state.candidateWindowColors);
   InvalidateRect(hwnd_, nullptr, FALSE);
+#endif
 }
 
 bool CandidateWindow::Create(HINSTANCE hInstance) {
@@ -422,7 +446,12 @@ bool CandidateWindow::Create(HINSTANCE hInstance) {
   hwnd_ = CreateWindowExW(
       WS_EX_TOOLWINDOW | WS_EX_TOPMOST, CANDIDATE_WINDOW_CLASS, L"",
       WS_POPUP | WS_CLIPCHILDREN, 0, 0, 100, 30,  // Initial dummy size
-      ownerHwnd_, nullptr, hInstance_, this);
+#ifdef WINMCBOPOMOFO_SERVER_SIDE_POPUP
+      nullptr,
+#else
+      ownerHwnd_,
+#endif
+      nullptr, hInstance_, this);
 
   return hwnd_ != nullptr;
 }
@@ -432,7 +461,6 @@ bool CandidateWindow::recreateWindow_() {
     return false;
   }
 
-  bool wasVisible = IsVisible();
   RECT rc = {0};
   if (hwnd_) {
     GetWindowRect(hwnd_, &rc);
@@ -449,22 +477,12 @@ bool CandidateWindow::recreateWindow_() {
                  rc.bottom - rc.top, SWP_NOACTIVATE);
   }
 
-  // LogMessage("CandidateWindow recreated hwnd=%p owner=%p wasVisible=%d",
-  // hwnd_,
-  //            ownerHwnd_, wasVisible ? 1 : 0);
+  // LogMessage("CandidateWindow recreated hwnd=%p owner=%p", hwnd_,
+  //            ownerHwnd_);
   return true;
 }
 
-void CandidateWindow::updateRenderMode_() {
-  const RenderMode newMode =
-      ShouldUseGdiRendererForHost(ownerHwnd_) ? RenderMode::kGDI
-                                              : RenderMode::kD2D;
-  if (renderMode_ != newMode) {
-    renderMode_ = newMode;
-    // LogMessage("CandidateWindow renderer=%s owner=%p",
-    //            renderMode_ == RenderMode::kGDI ? "GDI" : "D2D", ownerHwnd_);
-  }
-}
+void CandidateWindow::updateRenderMode_() { renderMode_ = RenderMode::kD2D; }
 
 void CandidateWindow::SetOwnerWindow(HWND ownerHwnd) {
   if (ownerHwnd && !IsWindow(ownerHwnd)) {
@@ -477,9 +495,16 @@ void CandidateWindow::SetOwnerWindow(HWND ownerHwnd) {
     return;
   }
 
+#ifndef WINMCBOPOMOFO_SERVER_SIDE_POPUP
   const HWND previousOwner = ownerHwnd_;
+#endif
   ownerHwnd_ = ownerHwnd;
   updateRenderMode_();
+#ifdef WINMCBOPOMOFO_SERVER_SIDE_POPUP
+  // Server-side popups live in McBopomofoServer.exe, not in the foreground
+  // app process. Do not owner-chain a server HWND to a cross-process
+  // foreground HWND.
+#else
   if (!hwnd_) {
     return;
   }
@@ -492,6 +517,7 @@ void CandidateWindow::SetOwnerWindow(HWND ownerHwnd) {
                     reinterpret_cast<LONG_PTR>(ownerHwnd_));
   // LogMessage("CandidateWindow owner updated hwnd=%p owner=%p", hwnd_,
   //            ownerHwnd_);
+#endif
 }
 
 void CandidateWindow::Destroy() {
@@ -840,16 +866,11 @@ LRESULT CALLBACK CandidateWindow::wndProc_(HWND hwnd, UINT uMsg, WPARAM wParam,
       return pThis->onPaint_(hwnd);
     } else if (uMsg == WM_ERASEBKGND) {
       return 1;
-    } else if (uMsg == WM_SETTINGCHANGE) {
-      if (lParam != 0 && wcscmp(reinterpret_cast<LPCWSTR>(lParam),
-                                L"ImmersiveColorSet") == 0) {
-        pThis->reloadServerControlledSettings_();
-        return 0;
-      }
-      pThis->onSettingChange_();
-    } else if (uMsg == WM_DWMCOLORIZATIONCOLORCHANGED) {
+    } else if (IsSystemColorSettingsChange(uMsg, lParam)) {
       pThis->reloadServerControlledSettings_();
       return 0;
+    } else if (uMsg == WM_SETTINGCHANGE) {
+      pThis->onSettingChange_();
     } else if (uMsg == WM_DPICHANGED) {
       pThis->dpiScale_ = (float)LOWORD(wParam) / 96.0f;
       RECT* prcNewWindow = (RECT*)lParam;

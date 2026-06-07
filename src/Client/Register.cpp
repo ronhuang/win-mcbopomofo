@@ -44,6 +44,29 @@ static const WCHAR c_szInfoKeyPrefix[] = L"CLSID\\";
 static const WCHAR c_szInProcSvr32[] = L"InProcServer32";
 static const WCHAR c_szModelName[] = L"ThreadingModel";
 
+static std::wstring LoadStringResourceForLanguage(HINSTANCE hInstance,
+                                                  UINT resourceId,
+                                                  LANGID langid) {
+  HRSRC resource = FindResourceExW(
+      hInstance, MAKEINTRESOURCEW(6), MAKEINTRESOURCEW((resourceId >> 4) + 1),
+      langid);
+  if (!resource) return L"";
+
+  HGLOBAL resourceData = LoadResource(hInstance, resource);
+  if (!resourceData) return L"";
+
+  const WCHAR* strings = static_cast<const WCHAR*>(LockResource(resourceData));
+  if (!strings) return L"";
+
+  const UINT stringIndex = resourceId & 0x0f;
+  for (UINT i = 0; i < stringIndex; ++i) {
+    strings += 1 + *strings;
+  }
+
+  const WORD length = *strings++;
+  return std::wstring(strings, strings + length);
+}
+
 BOOL SetRegString(HKEY hKey, LPCWSTR lpSubKey, LPCWSTR lpValueName,
                   LPCWSTR lpData) {
   HKEY hSubKey = nullptr;
@@ -116,7 +139,14 @@ BOOL RegisterProfiles() {
   LANGID langid = MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL);
 
   std::wstring desc =
-      McBopomofo::LoadLocalizedStringW(g_hInst, IDS_WIN_MCBOPOMOFO);
+      LoadStringResourceForLanguage(g_hInst, IDS_WIN_MCBOPOMOFO, langid);
+  if (desc.empty()) {
+    desc = McBopomofo::LoadLocalizedStringW(g_hInst, IDS_WIN_MCBOPOMOFO);
+  }
+  if (desc.empty()) {
+    pProfileMgr->Release();
+    return FALSE;
+  }
   hr = pProfileMgr->RegisterProfile(
       c_clsidMcBopomofoTIP, langid, c_guidMcBopomofoProfile, desc.c_str(),
       (ULONG)desc.length(), szModulePath, (ULONG)wcslen(szModulePath),

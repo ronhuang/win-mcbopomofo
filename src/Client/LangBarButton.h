@@ -34,12 +34,14 @@ class McBopomofoTIP;
 
 extern const GUID GUID_LBI_INPUTMODE;
 extern const GUID GUID_LBI_SWITCH_LANG;
+extern const GUID GUID_LBI_FULL_HALF;
 extern const GUID GUID_LBI_SETTINGS;
 
 class CLangBarButton : public ITfLangBarItemButton, public ITfSource {
  public:
   enum class Kind {
-    ModeIcon,
+    ImeModeMenu,
+    FullHalfToggle,
     SwitchLanguageToggle,
     SettingsMenu,
   };

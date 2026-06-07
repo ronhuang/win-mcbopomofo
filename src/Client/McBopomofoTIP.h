@@ -25,9 +25,7 @@
 #include <msctf.h>
 #include <windows.h>
 
-#include "CandidateWindow.h"
 #include "Ipc.h"
-#include "TooltipWindow.h"
 #include "TsfUiElement.h"
 
 class McBopomofoTIP : public ITfTextInputProcessorEx,
@@ -101,10 +99,10 @@ class McBopomofoTIP : public ITfTextInputProcessorEx,
   void uninitThreadMgrEventSink_();
   BOOL initThreadFocusSink_();
   void uninitThreadFocusSink_();
-  bool isDirectCommitWithoutComposition_(
-      const McBopomofo::IPC::StateUpdatePayload& state) const;
-  void hideAuxiliaryWindowsForDirectCommit_(
-      const McBopomofo::IPC::StateUpdatePayload& state);
+
+
+  void updateProcessDisabledState_();
+  bool isProcessDisabled_() const { return processDisabled_; }
   void resetServerState_();
   bool shouldToggleOpenCloseWithShift_() const;
   bool handleStandaloneShiftKeyDown_(WPARAM wParam,
@@ -125,23 +123,24 @@ class McBopomofoTIP : public ITfTextInputProcessorEx,
   McBopomofo::IPC::StateUpdatePayload lastState_;
 
   ITfComposition* pComposition_;
-  CandidateWindow candidateWindow_;
-  TooltipWindow tooltipWindow_;
 
-  // Modern input mode icon that appears directly in the Windows Taskbar
-  // (Input Indicator area in Windows 10/11).
+  // IME mode icon shown in the Windows taskbar; left-click toggles
+  // Chinese/English mode and right-click opens the mode menu.
   class CLangBarButton* pModeIconButton_;
 
-  // Toggle button that appears in the legacy Windows Language Bar
-  // to switch between Chinese and English mode.
+  // Toggle button shown in the language bar to switch Chinese/English mode.
   class CLangBarButton* pSwitchLangButton_;
+
+  // Full-width / half-width punctuation toggle shown in the language bar.
+  class CLangBarButton* pFullHalfButton_;
 
   // Settings menu button that appears in the legacy Windows Language Bar.
   class CLangBarButton* pSettingsButton_;
 
   bool shiftToggleKeyPending_ = false;
+  bool processDisabled_ = false;
 
- public:
+  public:
   void ToggleOpenClose();
   bool IsOpen();
   void RefreshLangBar();
@@ -152,8 +151,7 @@ class McBopomofoTIP : public ITfTextInputProcessorEx,
  public:
   ITfComposition* GetComposition() const { return pComposition_; }
   void SetComposition(ITfComposition* pComp) { pComposition_ = pComp; }
-  CandidateWindow* GetCandidateWindow() { return &candidateWindow_; }
-  TooltipWindow* GetTooltipWindow() { return &tooltipWindow_; }
+
 
   ITfUIElementMgr* GetUIElementMgr() const { return pUIElementMgr_; }
   CCandidateListUIElement* GetCandidateUIElement() const {
@@ -171,23 +169,10 @@ class McBopomofoTIP : public ITfTextInputProcessorEx,
   ITfThreadMgr* GetThreadMgr() const { return ptim_; }
   TfClientId GetClientId() const { return tid_; }
 
-  bool IsShowCustomCandidateWindow() const {
-    return showCustomCandidateWindow_;
-  }
-  void SetShowCustomCandidateWindow(bool show) {
-    showCustomCandidateWindow_ = show;
-  }
-  bool IsShowCustomTooltipWindow() const { return showCustomTooltipWindow_; }
-  void SetShowCustomTooltipWindow(bool show) {
-    showCustomTooltipWindow_ = show;
-  }
-
  private:
   ITfUIElementMgr* pUIElementMgr_ = nullptr;
   CCandidateListUIElement* pCandidateUIElement_ = nullptr;
   CReadingInformationUIElement* pReadingUIElement_ = nullptr;
   DWORD dwCandidateUIElementId_ = 0;
   DWORD dwReadingUIElementId_ = 0;
-  bool showCustomCandidateWindow_ = true;
-  bool showCustomTooltipWindow_ = true;
 };

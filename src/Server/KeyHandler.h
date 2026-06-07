@@ -33,7 +33,6 @@
 #include "InputMode.h"
 #include "InputState.h"
 #include "Key.h"
-#include "LanguageModelLoader.h"
 #include "Mandarin/Mandarin.h"
 #include "UserOverrideModel.h"
 #include "gramambular2/language_model.h"
@@ -42,6 +41,7 @@
 namespace McBopomofo {
 
 class VariantAnnotator;
+class UserPhraseAdder;
 
 class LocalizedStrings {
  public:
@@ -89,7 +89,8 @@ class KeyHandler {
 
   bool handleAssociatedPhrases(InputStates::Inputting* state,
                                StateCallback stateCallback,
-                               ErrorCallback errorCallback, bool autoTriggered);
+                               ErrorCallback errorCallback,
+                               bool autoTriggered = false);
 
   bool handleNumberInput(Key key, InputStates::NumberInput* state,
                          StateCallback stateCallback,

@@ -217,7 +217,12 @@ bool TooltipWindow::Create(HINSTANCE hInstance) {
   hwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                           TOOLTIP_WINDOW_CLASS, L"", WS_POPUP | WS_CLIPCHILDREN,
                           0, 0, 100, 30,  // Initial dummy size
-                          ownerHwnd_, nullptr, hInstance_, this);
+#ifdef WINMCBOPOMOFO_SERVER_SIDE_POPUP
+                          nullptr,
+#else
+                          ownerHwnd_,
+#endif
+                          nullptr, hInstance_, this);
 
   EnableWindowDropShadow(hwnd_);
 
@@ -229,7 +234,6 @@ bool TooltipWindow::recreateWindow_() {
     return false;
   }
 
-  bool wasVisible = IsVisible();
   RECT rc = {0};
   if (hwnd_) {
     GetWindowRect(hwnd_, &rc);
@@ -246,21 +250,12 @@ bool TooltipWindow::recreateWindow_() {
                  rc.bottom - rc.top, SWP_NOACTIVATE);
   }
 
-  // LogMessage("TooltipWindow recreated hwnd=%p owner=%p wasVisible=%d", hwnd_,
-  //            ownerHwnd_, wasVisible ? 1 : 0);
+  // LogMessage("TooltipWindow recreated hwnd=%p owner=%p", hwnd_,
+  //            ownerHwnd_);
   return true;
 }
 
-void TooltipWindow::updateRenderMode_() {
-  const RenderMode newMode =
-      ShouldUseGdiRendererForHost(ownerHwnd_) ? RenderMode::kGDI
-                                              : RenderMode::kD2D;
-  if (renderMode_ != newMode) {
-    renderMode_ = newMode;
-    // LogMessage("TooltipWindow renderer=%s owner=%p",
-    //            renderMode_ == RenderMode::kGDI ? "GDI" : "D2D", ownerHwnd_);
-  }
-}
+void TooltipWindow::updateRenderMode_() { renderMode_ = RenderMode::kD2D; }
 
 void TooltipWindow::SetOwnerWindow(HWND ownerHwnd) {
   if (ownerHwnd && !IsWindow(ownerHwnd)) {
@@ -273,9 +268,15 @@ void TooltipWindow::SetOwnerWindow(HWND ownerHwnd) {
     return;
   }
 
+#ifndef WINMCBOPOMOFO_SERVER_SIDE_POPUP
   const HWND previousOwner = ownerHwnd_;
+#endif
   ownerHwnd_ = ownerHwnd;
   updateRenderMode_();
+#ifdef WINMCBOPOMOFO_SERVER_SIDE_POPUP
+  // Server-side popups are owned by McBopomofoServer.exe. ownerHwnd_ is kept
+  // only for compatibility with the shared owner-update path.
+#else
   if (!hwnd_) {
     return;
   }
@@ -288,6 +289,7 @@ void TooltipWindow::SetOwnerWindow(HWND ownerHwnd) {
                     reinterpret_cast<LONG_PTR>(ownerHwnd_));
   // LogMessage("TooltipWindow owner updated hwnd=%p owner=%p", hwnd_,
   // ownerHwnd_);
+#endif
 }
 
 void TooltipWindow::Destroy() {

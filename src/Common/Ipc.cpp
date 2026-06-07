@@ -44,10 +44,20 @@ bool ReadSizedString(std::istringstream& ss, std::string& value) {
     return false;
   }
 
-  value.resize(size);
+  try {
+    value.resize(size);
+  } catch (...) {
+    return false;
+  }
+
+  const auto streamSize = static_cast<std::streamsize>(size);
+  if (size != static_cast<size_t>(streamSize)) {
+    return false;
+  }
+
   if (size > 0) {
-    ss.read(value.data(), static_cast<std::streamsize>(size));
-    if (ss.gcount() != static_cast<std::streamsize>(size)) {
+    ss.read(value.data(), streamSize);
+    if (ss.gcount() != streamSize) {
       return false;
     }
   }
@@ -59,13 +69,13 @@ bool ReadSizedString(std::istringstream& ss, std::string& value) {
   return true;
 }
 
+bool HasNoTrailingData(std::istringstream& ss) {
+  return ss.peek() == std::char_traits<char>::eof();
+}
+
 }  // namespace
 
 // Extremely simple and fast newline-delimited serialization
-// Format for Key:
-// VK
-// SHIFT(1/0)
-// CTRL(1/0)
 
 std::string SerializeKeyEvent(const KeyEventPayload& payload) {
   std::ostringstream ss;
@@ -73,28 +83,40 @@ std::string SerializeKeyEvent(const KeyEventPayload& payload) {
      << payload.vk << "\n"
      << payload.ascii << "\n"
      << (payload.shift ? 1 : 0) << "\n"
-     << (payload.ctrl ? 1 : 0) << "\n";
+     << (payload.ctrl ? 1 : 0) << "\n"
+     << (payload.hasCoords ? 1 : 0) << "\n"
+     << payload.ownerHwnd << "\n"
+     << payload.anchorLeft << "\n"
+     << payload.anchorTop << "\n"
+     << payload.anchorRight << "\n"
+     << payload.anchorBottom << "\n";
   return ss.str();
 }
 
 bool DeserializeKeyEvent(const std::string& data, KeyEventPayload& payload) {
   std::istringstream ss(data);
+  std::vector<std::string> lines;
   std::string line;
+  while (std::getline(ss, line)) {
+    lines.push_back(line);
+  }
 
-  if (!std::getline(ss, line)) return false;
-  if (std::stoi(line) != (int)Command::CMD_KEY_EVENT) return false;
-
-  if (!std::getline(ss, line)) return false;
-  payload.vk = std::stoul(line);
-
-  if (!std::getline(ss, line)) return false;
-  payload.ascii = std::stoul(line);
-
-  if (!std::getline(ss, line)) return false;
-  payload.shift = (line == "1");
-
-  if (!std::getline(ss, line)) return false;
-  payload.ctrl = (line == "1");
+  if (lines.size() != 11) return false;
+  try {
+    if (std::stoi(lines[0]) != (int)Command::CMD_KEY_EVENT) return false;
+    payload.vk = std::stoul(lines[1]);
+    payload.ascii = std::stoul(lines[2]);
+    payload.shift = (lines[3] == "1");
+    payload.ctrl = (lines[4] == "1");
+    payload.hasCoords = (lines[5] == "1");
+    payload.ownerHwnd = std::stoull(lines[6]);
+    payload.anchorLeft = std::stoi(lines[7]);
+    payload.anchorTop = std::stoi(lines[8]);
+    payload.anchorRight = std::stoi(lines[9]);
+    payload.anchorBottom = std::stoi(lines[10]);
+  } catch (...) {
+    return false;
+  }
 
   return true;
 }
@@ -110,13 +132,17 @@ bool DeserializeSelectCandidate(const std::string& data,
   std::istringstream ss(data);
   std::string line;
 
-  if (!std::getline(ss, line)) return false;
-  if (std::stoi(line) != (int)Command::CMD_SELECT_CANDIDATE) return false;
+  try {
+    if (!std::getline(ss, line)) return false;
+    if (std::stoi(line) != (int)Command::CMD_SELECT_CANDIDATE) return false;
 
-  if (!std::getline(ss, line)) return false;
-  payload.index = std::stoi(line);
+    if (!std::getline(ss, line)) return false;
+    payload.index = std::stoi(line);
+  } catch (...) {
+    return false;
+  }
 
-  return true;
+  return HasNoTrailingData(ss);
 }
 
 std::string SerializeReset() {
@@ -199,7 +225,7 @@ bool DeserializeClientSettings(const std::string& data,
   std::string line;
   if (!std::getline(ss, line)) return false;
   payload.shiftToggleOpenClose = (line == "1");
-  return true;
+  return HasNoTrailingData(ss);
 }
 
 std::string SerializeClientLog(const ClientLogPayload& payload) {
@@ -215,43 +241,74 @@ bool DeserializeClientLog(const std::string& data, ClientLogPayload& payload) {
   std::istringstream ss(data);
   std::string line;
 
-  if (!std::getline(ss, line)) return false;
-  if (std::stoi(line) != (int)Command::CMD_CLIENT_LOG) return false;
+  try {
+    if (!std::getline(ss, line)) return false;
+    if (std::stoi(line) != (int)Command::CMD_CLIENT_LOG) return false;
 
-  if (!std::getline(ss, line)) return false;
-  payload.processId = static_cast<unsigned long>(std::stoul(line));
+    if (!std::getline(ss, line)) return false;
+    payload.processId = static_cast<unsigned long>(std::stoul(line));
 
-  if (!std::getline(ss, line)) return false;
-  payload.elapsedMs = std::stoull(line);
+    if (!std::getline(ss, line)) return false;
+    payload.elapsedMs = std::stoull(line);
+  } catch (...) {
+    return false;
+  }
 
-  return ReadSizedString(ss, payload.message);
+  return ReadSizedString(ss, payload.message) && HasNoTrailingData(ss);
 }
 
-// Format for StateUpdate:
-// CONSUMED(1/0)
-// CURSOR_INDEX
-// COMMIT_STRING
-// COMPOSING_BUFFER
-// CANDIDATE_COUNT
-// CANDIDATE_1
-// CANDIDATE_2
-// ...
+std::string SerializeProcessDisabledQuery(
+    const ProcessDisabledQueryPayload& payload) {
+  std::ostringstream ss;
+  ss << (int)Command::CMD_IS_PROCESS_DISABLED << "\n";
+  WriteSizedString(ss, payload.processName);
+  return ss.str();
+}
+
+bool DeserializeProcessDisabledQuery(const std::string& data,
+                                     ProcessDisabledQueryPayload& payload) {
+  std::istringstream ss(data);
+  std::string line;
+
+  try {
+    if (!std::getline(ss, line)) return false;
+    if (std::stoi(line) != (int)Command::CMD_IS_PROCESS_DISABLED) return false;
+  } catch (...) {
+    return false;
+  }
+
+  return ReadSizedString(ss, payload.processName) && HasNoTrailingData(ss);
+}
+
+std::string SerializeProcessDisabledResponse(
+    const ProcessDisabledResponsePayload& payload) {
+  std::ostringstream ss;
+  ss << (payload.disabled ? 1 : 0) << "\n";
+  return ss.str();
+}
+
+bool DeserializeProcessDisabledResponse(
+    const std::string& data, ProcessDisabledResponsePayload& payload) {
+  std::istringstream ss(data);
+  std::string line;
+  if (!std::getline(ss, line)) return false;
+  payload.disabled = (line == "1");
+  return HasNoTrailingData(ss);
+}
+
+
 
 std::string SerializeStateUpdate(const StateUpdatePayload& payload) {
   std::ostringstream ss;
   ss << (payload.consumed ? 1 : 0) << "\n"
      << payload.cursorIndex << "\n"
      << payload.candidateIndex << "\n"
-     << payload.candidateFontSize << "\n"
-     << (payload.forceVertical ? 1 : 0) << "\n"
-     << static_cast<int>(payload.selectionStyle) << "\n"
      << payload.markStart << "\n"
      << payload.markEnd << "\n";
 
   WriteSizedString(ss, payload.commitString);
   WriteSizedString(ss, payload.composingBuffer);
   WriteSizedString(ss, payload.tooltip);
-  WriteSizedString(ss, payload.hint);
 
   ss << payload.candidates.size() << "\n";
 
@@ -260,13 +317,7 @@ std::string SerializeStateUpdate(const StateUpdatePayload& payload) {
   }
 
   WriteSizedString(ss, payload.candidateKeys);
-  ss << (payload.candidateWindowVertical ? 1 : 0) << "\n"
-     << payload.candidateKeysCount << "\n"
-     << payload.candidateWindowColors.text << "\n"
-     << payload.candidateWindowColors.background << "\n"
-     << payload.candidateWindowColors.border << "\n"
-     << payload.candidateWindowColors.highlightBackground << "\n"
-     << payload.candidateWindowColors.highlightText << "\n";
+  ss << payload.candidateKeysCount << "\n";
   return ss.str();
 }
 
@@ -275,38 +326,36 @@ bool DeserializeStateUpdate(const std::string& data,
   std::istringstream ss(data);
   std::string line;
 
-  if (!std::getline(ss, line)) return false;
-  payload.consumed = (line == "1");
+  try {
+    if (!std::getline(ss, line)) return false;
+    payload.consumed = (line == "1");
 
-  if (!std::getline(ss, line)) return false;
-  payload.cursorIndex = std::stoi(line);
+    if (!std::getline(ss, line)) return false;
+    payload.cursorIndex = std::stoi(line);
 
-  if (!std::getline(ss, line)) return false;
-  payload.candidateIndex = std::stoi(line);
+    if (!std::getline(ss, line)) return false;
+    payload.candidateIndex = std::stoi(line);
 
-  if (!std::getline(ss, line)) return false;
-  payload.candidateFontSize = std::stoi(line);
+    if (!std::getline(ss, line)) return false;
+    payload.markStart = std::stoi(line);
 
-  if (!std::getline(ss, line)) return false;
-  payload.forceVertical = (line == "1");
-
-  if (!std::getline(ss, line)) return false;
-  payload.selectionStyle =
-      static_cast<CandidateSelectionStyle>(std::stoi(line));
-
-  if (!std::getline(ss, line)) return false;
-  payload.markStart = std::stoi(line);
-
-  if (!std::getline(ss, line)) return false;
-  payload.markEnd = std::stoi(line);
+    if (!std::getline(ss, line)) return false;
+    payload.markEnd = std::stoi(line);
+  } catch (...) {
+    return false;
+  }
 
   if (!ReadSizedString(ss, payload.commitString)) return false;
   if (!ReadSizedString(ss, payload.composingBuffer)) return false;
   if (!ReadSizedString(ss, payload.tooltip)) return false;
-  if (!ReadSizedString(ss, payload.hint)) return false;
 
-  if (!std::getline(ss, line)) return false;
-  size_t count = std::stoul(line);
+  size_t count = 0;
+  try {
+    if (!std::getline(ss, line)) return false;
+    count = std::stoul(line);
+  } catch (...) {
+    return false;
+  }
 
   payload.candidates.clear();
   for (size_t i = 0; i < count; ++i) {
@@ -315,33 +364,15 @@ bool DeserializeStateUpdate(const std::string& data,
     payload.candidates.push_back(std::move(candidate));
   }
 
-  std::string parsedCandidateKeys;
-  if (ReadSizedString(ss, parsedCandidateKeys)) {
-    payload.candidateKeys = std::move(parsedCandidateKeys);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowVertical = (line == "1");
-
+  if (!ReadSizedString(ss, payload.candidateKeys)) return false;
+  try {
     if (!std::getline(ss, line)) return false;
     payload.candidateKeysCount = std::stoi(line);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowColors.text = std::stoul(line);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowColors.background = std::stoul(line);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowColors.border = std::stoul(line);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowColors.highlightBackground = std::stoul(line);
-
-    if (!std::getline(ss, line)) return false;
-    payload.candidateWindowColors.highlightText = std::stoul(line);
+  } catch (...) {
+    return false;
   }
 
-  return true;
+  return HasNoTrailingData(ss);
 }
 
 }  // namespace IPC

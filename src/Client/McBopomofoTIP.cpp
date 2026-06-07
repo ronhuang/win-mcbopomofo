@@ -23,10 +23,14 @@
 
 #include "McBopomofoTIP.h"
 
+#include <string>
+
+#include "EditSession.h"
 #include "Globals.h"
 #include "LangBarButton.h"
 #include "NamedPipe.h"
 #include "StateEditSession.h"
+#include "UTFHelper.h"
 
 namespace {
 
@@ -175,6 +179,27 @@ bool IsStandaloneModifierKey(WPARAM wParam) {
   }
 }
 
+bool IsHostEditingKey(WPARAM wParam) {
+  switch (wParam) {
+    case VK_RETURN:
+    case VK_ESCAPE:
+    case VK_TAB:
+    case VK_BACK:
+    case VK_DELETE:
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_UP:
+    case VK_DOWN:
+    case VK_HOME:
+    case VK_END:
+    case VK_PRIOR:
+    case VK_NEXT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool IsShiftKey(WPARAM wParam) {
   switch (wParam) {
     case VK_SHIFT:
@@ -215,6 +240,122 @@ bool GetFocusedContext(ITfThreadMgr* threadMgr, ITfContext** context) {
   return SUCCEEDED(hr) && *context != nullptr;
 }
 
+HWND GetContextWindow(ITfContext* context) {
+  if (context) {
+    ITfContextView* view = nullptr;
+    if (SUCCEEDED(context->GetActiveView(&view)) && view) {
+      HWND hwnd = nullptr;
+      if (SUCCEEDED(view->GetWnd(&hwnd)) && hwnd) {
+        view->Release();
+        return hwnd;
+      }
+      view->Release();
+    }
+  }
+  return GetFocus();
+}
+
+bool IsUsableLayoutRect(const RECT& rc) {
+  return rc.bottom > rc.top &&
+         (rc.left != 0 || rc.top != 0 || rc.right != 0 || rc.bottom != 0);
+}
+
+bool GetCaretFallbackRect(RECT* rect) {
+  if (!rect) {
+    return false;
+  }
+
+  GUITHREADINFO gti = {0};
+  gti.cbSize = sizeof(GUITHREADINFO);
+  if (!GetGUIThreadInfo(GetCurrentThreadId(), &gti) || !gti.hwndCaret) {
+    return false;
+  }
+
+  RECT caretRect = gti.rcCaret;
+  POINT topLeft = {caretRect.left, caretRect.top};
+  POINT bottomRight = {caretRect.right, caretRect.bottom};
+  ClientToScreen(gti.hwndCaret, &topLeft);
+  ClientToScreen(gti.hwndCaret, &bottomRight);
+
+  rect->left = topLeft.x;
+  rect->top = topLeft.y;
+  rect->right = bottomRight.x;
+  rect->bottom = bottomRight.y;
+  return IsUsableLayoutRect(*rect);
+}
+
+class CKeyLayoutEditSession : public CEditSessionBase {
+ public:
+  CKeyLayoutEditSession(ITfContext* context, RECT* rect, bool* hasRect)
+      : CEditSessionBase(context), rect_(rect), hasRect_(hasRect) {}
+
+  STDMETHODIMP DoEditSession(TfEditCookie ec) override {
+    if (!rect_ || !hasRect_) {
+      return E_INVALIDARG;
+    }
+
+    *hasRect_ = false;
+
+    TF_SELECTION selection = {};
+    ULONG fetched = 0;
+    HRESULT hr = pContext_->GetSelection(ec, TF_DEFAULT_SELECTION, 1,
+                                         &selection, &fetched);
+    if (SUCCEEDED(hr) && fetched == 1 && selection.range) {
+      ITfContextView* view = nullptr;
+      if (SUCCEEDED(pContext_->GetActiveView(&view)) && view) {
+        RECT rc = {0};
+        BOOL clipped = FALSE;
+        hr = view->GetTextExt(ec, selection.range, &rc, &clipped);
+        if (SUCCEEDED(hr) && IsUsableLayoutRect(rc)) {
+          *rect_ = rc;
+          *hasRect_ = true;
+        }
+        view->Release();
+      }
+      selection.range->Release();
+    }
+
+    if (!*hasRect_) {
+      *hasRect_ = GetCaretFallbackRect(rect_);
+    }
+    return S_OK;
+  }
+
+ private:
+  RECT* rect_;
+  bool* hasRect_;
+};
+
+bool GetKeyDownLayout(ITfContext* context, TfClientId clientId, RECT* rect) {
+  if (!context || !rect) {
+    return false;
+  }
+
+  bool hasRect = false;
+  CKeyLayoutEditSession* session =
+      new CKeyLayoutEditSession(context, rect, &hasRect);
+  HRESULT editSessionResult = E_FAIL;
+  HRESULT hr = context->RequestEditSession(
+      clientId, session, TF_ES_SYNC | TF_ES_READ, &editSessionResult);
+  session->Release();
+  return SUCCEEDED(hr) && SUCCEEDED(editSessionResult) && hasRect;
+}
+
+std::string CurrentProcessNameUtf8() {
+  wchar_t path[MAX_PATH];
+  DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
+  if (length == 0) {
+    return "";
+  }
+
+  std::wstring processPath(path, length);
+  size_t slash = processPath.find_last_of(L"\\/");
+  if (slash != std::wstring::npos) {
+    processPath.erase(0, slash + 1);
+  }
+  return McBopomofo::Utf16ToUtf8(processPath);
+}
+
 }  // namespace
 
 McBopomofoTIP::McBopomofoTIP()
@@ -226,7 +367,8 @@ McBopomofoTIP::McBopomofoTIP()
       dwOpenCloseCompartmentEventSinkCookie_(TF_INVALID_COOKIE),
       pComposition_(nullptr),
       pModeIconButton_(nullptr),
-      pSwitchLangButton_(nullptr) {
+      pSwitchLangButton_(nullptr),
+      pFullHalfButton_(nullptr) {
   DllAddRef();
 }
 
@@ -374,11 +516,14 @@ STDAPI McBopomofoTIP::Activate(ITfThreadMgr* ptim, TfClientId tid) {
 
 STDAPI McBopomofoTIP::ActivateEx(ITfThreadMgr* ptim, TfClientId tid,
                                  DWORD dwFlags) {
+  UNREFERENCED_PARAMETER(dwFlags);
   // LogMessage("McBopomofoTIP::ActivateEx called with flags: %u", dwFlags);
 
   if (ptim == nullptr) {
     return E_INVALIDARG;
   }
+
+  updateProcessDisabledState_();
 
   ptim_ = ptim;
   ptim_->AddRef();
@@ -402,23 +547,22 @@ STDAPI McBopomofoTIP::ActivateEx(ITfThreadMgr* ptim, TfClientId tid,
     return E_FAIL;
   }
 
-  extern HINSTANCE g_hInst;
-  candidateWindow_.Create(g_hInst);
-  tooltipWindow_.Create(g_hInst);
-
   // Register LangBar button - must be created BEFORE setting compartment value
   // because SetValue triggers OnChange callback synchronously
   ITfLangBarItemMgr* pLangBarItemMgr = nullptr;
   if (SUCCEEDED(ptim_->QueryInterface(IID_ITfLangBarItemMgr,
                                       (void**)&pLangBarItemMgr))) {
     pModeIconButton_ = new CLangBarButton(this, GUID_LBI_INPUTMODE,
-                                          CLangBarButton::Kind::ModeIcon);
+                                          CLangBarButton::Kind::ImeModeMenu);
     pSwitchLangButton_ = new CLangBarButton(
         this, GUID_LBI_SWITCH_LANG, CLangBarButton::Kind::SwitchLanguageToggle);
+    pFullHalfButton_ = new CLangBarButton(this, GUID_LBI_FULL_HALF,
+                                          CLangBarButton::Kind::FullHalfToggle);
     pSettingsButton_ = new CLangBarButton(this, GUID_LBI_SETTINGS,
                                           CLangBarButton::Kind::SettingsMenu);
     pLangBarItemMgr->AddItem(pModeIconButton_);
     pLangBarItemMgr->AddItem(pSwitchLangButton_);
+    pLangBarItemMgr->AddItem(pFullHalfButton_);
     pLangBarItemMgr->AddItem(pSettingsButton_);
     pLangBarItemMgr->Release();
   }
@@ -478,7 +622,8 @@ STDAPI McBopomofoTIP::Deactivate() {
     pUIElementMgr_ = nullptr;
   }
 
-  if (pModeIconButton_ || pSwitchLangButton_ || pSettingsButton_) {
+  if (pModeIconButton_ || pSwitchLangButton_ || pFullHalfButton_ ||
+      pSettingsButton_) {
     ITfLangBarItemMgr* pLangBarItemMgr = nullptr;
     if (SUCCEEDED(ptim_->QueryInterface(IID_ITfLangBarItemMgr,
                                         (void**)&pLangBarItemMgr))) {
@@ -487,6 +632,9 @@ STDAPI McBopomofoTIP::Deactivate() {
       }
       if (pSwitchLangButton_) {
         pLangBarItemMgr->RemoveItem(pSwitchLangButton_);
+      }
+      if (pFullHalfButton_) {
+        pLangBarItemMgr->RemoveItem(pFullHalfButton_);
       }
       if (pSettingsButton_) {
         pLangBarItemMgr->RemoveItem(pSettingsButton_);
@@ -501,13 +649,15 @@ STDAPI McBopomofoTIP::Deactivate() {
       pSwitchLangButton_->Release();
       pSwitchLangButton_ = nullptr;
     }
+    if (pFullHalfButton_) {
+      pFullHalfButton_->Release();
+      pFullHalfButton_ = nullptr;
+    }
     if (pSettingsButton_) {
       pSettingsButton_->Release();
       pSettingsButton_ = nullptr;
     }
   }
-
-  candidateWindow_.Destroy();
 
   uninitCompartmentEventSink_();
   uninitThreadFocusSink_();
@@ -530,6 +680,9 @@ STDAPI McBopomofoTIP::Deactivate() {
 
 STDAPI McBopomofoTIP::OnSetFocus(BOOL fForeground) {
   shiftToggleKeyPending_ = false;
+  if (isProcessDisabled_()) {
+    return S_OK;
+  }
   if (!fForeground) {
     resetServerState_();
   }
@@ -539,8 +692,13 @@ STDAPI McBopomofoTIP::OnSetFocus(BOOL fForeground) {
 STDAPI McBopomofoTIP::OnTestKeyDown(ITfContext* pic, WPARAM wParam,
                                     LPARAM lParam, BOOL* pfEaten) {
   UNREFERENCED_PARAMETER(pic);
+  UNREFERENCED_PARAMETER(lParam);
   if (pfEaten == nullptr) {
     return E_INVALIDARG;
+  }
+  if (isProcessDisabled_()) {
+    *pfEaten = FALSE;
+    return S_OK;
   }
 
   BYTE keyboardState[256];
@@ -563,22 +721,27 @@ STDAPI McBopomofoTIP::OnTestKeyDown(ITfContext* pic, WPARAM wParam,
     return S_OK;
   }
 
+  // If the composition buffer is empty, do not swallow control or editing
+  // keys, allowing them to pass through to the host application safely.
+  if (IsHostEditingKey(wParam)) {
+    *pfEaten = FALSE;
+    return S_OK;
+  }
+
   if (IsServerHandledShortcutKey(wParam, keyboardState)) {
     *pfEaten = TRUE;
     return S_OK;
   }
 
-  // No active state: only eat printable characters, let server decide if it
-  // wants to start composing
-  WCHAR chars[2] = {0};
-  if (ToUnicode((UINT)wParam, (lParam >> 16) & 0xFF, keyboardState, chars, 2,
-                0) == 1) {
-    // Only eat if it's a printable ASCII character (let server handle Bopomofo
-    // keys)
-    *pfEaten = (chars[0] >= 32 && chars[0] <= 126);
-  } else {
+  // Let the IME see ordinary keys even if they do not map to printable ASCII
+  // through the current keyboard layout. Otherwise TSF can skip OnKeyDown and
+  // the host application receives the raw key directly.
+  if (IsCtrlPressed(keyboardState) || IsAltPressed(keyboardState)) {
     *pfEaten = FALSE;
+    return S_OK;
   }
+
+  *pfEaten = TRUE;
 
   return S_OK;
 }
@@ -588,6 +751,10 @@ STDAPI McBopomofoTIP::OnKeyDown(ITfContext* pic, WPARAM wParam, LPARAM lParam,
                                 BOOL* pfEaten) {
   if (pfEaten == nullptr) {
     return E_INVALIDARG;
+  }
+  if (isProcessDisabled_()) {
+    *pfEaten = FALSE;
+    return S_OK;
   }
 
   BYTE keyboardState[256];
@@ -612,9 +779,20 @@ STDAPI McBopomofoTIP::OnKeyDown(ITfContext* pic, WPARAM wParam, LPARAM lParam,
   }
 
   McBopomofo::IPC::KeyEventPayload req;
+  HWND contextHwnd = GetContextWindow(pic);
   req.vk = (unsigned int)wParam;
   req.shift = IsShiftPressed(keyboardState);
   req.ctrl = IsCtrlPressed(keyboardState);
+  RECT keyLayout = {0};
+  if (GetKeyDownLayout(pic, tid_, &keyLayout)) {
+    req.hasCoords = true;
+    req.ownerHwnd =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(contextHwnd));
+    req.anchorLeft = static_cast<int>(keyLayout.left);
+    req.anchorTop = static_cast<int>(keyLayout.top);
+    req.anchorRight = static_cast<int>(keyLayout.right);
+    req.anchorBottom = static_cast<int>(keyLayout.bottom);
+  }
 
   GetKeyboardState(keyboardState);
   WCHAR chars[2] = {0};
@@ -634,13 +812,14 @@ STDAPI McBopomofoTIP::OnKeyDown(ITfContext* pic, WPARAM wParam, LPARAM lParam,
   if (pipe.Call(payload, response)) {
     // LogMessage("Received IPC response: %s", response.c_str());
     if (McBopomofo::IPC::DeserializeStateUpdate(response, lastState_)) {
-      *pfEaten = lastState_.consumed ? TRUE : FALSE;
+      const bool hasCommit = !lastState_.commitString.empty();
+      *pfEaten = (lastState_.consumed || hasCommit) ? TRUE : FALSE;
       // LogMessage(
       //     "State deserialized. Consumed: %d, CommitStr: '%s', CompStr: '%s'",
       //     lastState_.consumed, lastState_.commitString.c_str(),
       //     lastState_.composingBuffer.c_str());
 
-      if (lastState_.consumed) {
+      if (lastState_.consumed || hasCommit) {
         applyStateToContext_(pic, lastState_, "");
       }
     } else {
@@ -673,6 +852,11 @@ STDAPI McBopomofoTIP::OnKeyUp(ITfContext* pic, WPARAM wParam, LPARAM lParam,
   UNREFERENCED_PARAMETER(lParam);
   if (pfEaten == nullptr) {
     return E_INVALIDARG;
+  }
+  if (isProcessDisabled_()) {
+    shiftToggleKeyPending_ = false;
+    *pfEaten = FALSE;
+    return S_OK;
   }
 
   BYTE keyboardState[256];
@@ -798,8 +982,6 @@ STDAPI McBopomofoTIP::OnSetThreadFocus() {
 
 STDAPI McBopomofoTIP::OnKillThreadFocus() {
   shiftToggleKeyPending_ = false;
-  candidateWindow_.Hide();
-  tooltipWindow_.Hide();
   resetServerState_();
   return S_OK;
 }
@@ -813,29 +995,16 @@ bool McBopomofoTIP::IsOpen() {
   return true;
 }
 
-bool McBopomofoTIP::isDirectCommitWithoutComposition_(
-    const McBopomofo::IPC::StateUpdatePayload& state) const {
-  return !state.commitString.empty() && state.composingBuffer.empty() &&
-         pComposition_ == nullptr;
-}
 
-void McBopomofoTIP::hideAuxiliaryWindowsForDirectCommit_(
-    const McBopomofo::IPC::StateUpdatePayload& state) {
-  if (isDirectCommitWithoutComposition_(state)) {
-    tooltipWindow_.Hide();
-    candidateWindow_.Hide();
-  }
-}
 
 void McBopomofoTIP::applyStateToContext_(
     ITfContext* context, const McBopomofo::IPC::StateUpdatePayload& state,
     const char* logPrefix) {
+  UNREFERENCED_PARAMETER(logPrefix);
   if (!context) {
     // LogMessage("%sRequestEditSession skipped: null context", logPrefix);
     return;
   }
-
-  hideAuxiliaryWindowsForDirectCommit_(state);
 
   CStateEditSession* pEditSession = new CStateEditSession(context, this, state);
   HRESULT hr = E_FAIL;
@@ -866,12 +1035,7 @@ void McBopomofoTIP::resetServerState_() {
         // session");
       }
     }
-  } else {
-    // LogMessage("Failed to send RESET command");
   }
-
-  candidateWindow_.Hide();
-  tooltipWindow_.Hide();
 }
 
 void McBopomofoTIP::RefreshLangBar() {
@@ -883,10 +1047,41 @@ void McBopomofoTIP::RefreshLangBar() {
     // LogMessage("Refreshing switch lang button");
     pSwitchLangButton_->Update();
   }
+  if (pFullHalfButton_) {
+    // LogMessage("Refreshing full/half punctuation button");
+    pFullHalfButton_->Update();
+  }
   if (pSettingsButton_) {
     // LogMessage("Refreshing settings button");
     pSettingsButton_->Update();
   }
+}
+
+void McBopomofoTIP::updateProcessDisabledState_() {
+  processDisabled_ = false;
+
+  McBopomofo::IPC::ProcessDisabledQueryPayload query;
+  query.processName = CurrentProcessNameUtf8();
+  if (query.processName.empty()) {
+    return;
+  }
+
+  McBopomofo::IPC::NamedPipeClient pipe(McBopomofo::IPC::PIPE_NAME);
+  std::string response;
+  if (!pipe.Call(McBopomofo::IPC::SerializeProcessDisabledQuery(query),
+                 response)) {
+    // LogMessage("IS_PROCESS_DISABLED IPC Call failed, fallback to enabled");
+    return;
+  }
+
+  McBopomofo::IPC::ProcessDisabledResponsePayload payload;
+  if (!McBopomofo::IPC::DeserializeProcessDisabledResponse(response, payload)) {
+    // LogMessage("IS_PROCESS_DISABLED response deserialize failed, fallback to
+    // enabled");
+    return;
+  }
+
+  processDisabled_ = payload.disabled;
 }
 
 bool McBopomofoTIP::shouldToggleOpenCloseWithShift_() const {

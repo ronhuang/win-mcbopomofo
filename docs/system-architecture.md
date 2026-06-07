@@ -5,7 +5,7 @@
 The current system adopts a Client/Server architecture, consisting of four main components:
 
 1. `src/Server`
-   A single background process responsible for the core input method logic, state management, settings, and language model loading.
+   A single background process responsible for the core input method logic, state management, settings, language model loading, and custom candidate/tooltip popup windows.
 2. `src/Client`
    The TSF TIP DLL, loaded into the foreground application process, responsible for intercepting key presses and operating the TSF composition.
 3. `src/Common`
@@ -25,8 +25,11 @@ Main responsibilities:
 - Create `KeyHandler`.
 - Create `InputController`.
 - Load and apply `Settings`.
+- Monitor configuration and user phrase files on the file system, and reload the
+  affected runtime data when those files change.
 - Receive key event / select candidate / reload / reset commands from the Client.
 - Map `InputState` to `IPC::StateUpdatePayload`.
+- Own and render the custom `CandidateWindow` and `TooltipWindow` HWNDs.
 
 The Server itself can be divided into two layers:
 
@@ -54,10 +57,11 @@ Main responsibilities:
     - composing string
     - caret
     - display attribute
-    - candidate window
-    - tooltip window
+    - TSF candidate UIElement data
+- Probe the focused TSF context for caret / range geometry.
+- Include the focused HWND and screen-space anchor rectangle in `KeyEventPayload` when geometry is available.
 
-The Client itself does not judge language models or character selection logic; it only performs display and commits based on the payload returned by the Server.
+The Client itself does not judge language models or character selection logic. It applies TSF composition / commit behavior based on the payload returned by the Server, and it routes candidate UI decisions between the TSF UIElement path and the Server-owned custom popup path.
 
 ### Common
 
@@ -80,13 +84,60 @@ Main responsibilities:
 - Display the Win32 GUI.
 - Notify the Server to reload settings via `IPC::SerializeReloadSettings()` after saving.
 
-## 3. Main Data Flows
+## 3. State-Driven Input Model
+
+The input method is state-driven. A key event does not directly mutate the UI or
+directly emit text. Instead, the Server interprets each key event against the
+current input state and produces the next input state. Output text and UI updates
+are derived from that state transition.
+
+Conceptually:
+
+```text
+(new state, output text, UI update) = f(old state, key event)
+```
+
+This has several consequences:
+
+- The same key can have different meanings in different states. For example,
+  `Space`, `Enter`, `Esc`, and arrow keys are interpreted differently in
+  `Inputting`, `ChoosingCandidate`, `AssociatedPhrases`, `NumberInput`, or
+  `CustomMenu`.
+- The UI is a projection of state, not the source of truth. Candidate lists,
+  composing text, cursor position, marks, hints, tooltips, and candidate window
+  behavior are derived from `InputState` and converted into
+  `IPC::StateUpdatePayload`.
+- Text commit is also modeled as a state transition. `Committing` is consumed by
+  `InputController`, converted into `UIInterface::CommitString()`, and then the
+  controller returns to `Empty`.
+- Reset and cancellation are explicit state transitions. For example,
+  `EmptyIgnoringPrevious` means the previous composing buffer should be
+  discarded rather than committed.
+
+The practical reducer pipeline is:
+
+```text
+InputController::handleKey(old state, key)
+    -> KeyHandler / candidate handling
+    -> new InputState
+    -> InputController::enterNewState(previous state, new state)
+    -> commit/reset/candidateIndex side effects
+    -> InputController::buildStateUpdatePayload(current state)
+    -> Client TSF composition and UI update
+```
+
+This design keeps language-model behavior, candidate selection, and special input
+modes in the Server state machine, while the Client remains responsible for
+applying the resulting TSF composition and commit operations in the foreground
+process.
+
+## 4. Main Data Flows
 
 ### Keyboard Event Flow
 
 1. The foreground application receives a key press.
 2. TSF calls the Client's `OnTestKeyDown()` / `OnKeyDown()`.
-3. The Client converts the key press into an `IPC::KeyEventPayload`.
+3. The Client converts the key press into an `IPC::KeyEventPayload`, including the focused HWND and screen-space anchor rectangle when available.
 4. The payload is sent to the Server via Named Pipe.
 5. The Server calls `InputController::HandleKey()`.
 6. `InputController` may further call `KeyHandler` or candidate handling logic.
@@ -105,7 +156,18 @@ Main responsibilities:
    - `Empty`
 4. The Client updates the preedit or commits directly based on the payload.
 
-## 4. Boundary Between State and Display
+### File-System Reload Flow
+
+The Server also observes runtime data stored on the file system. When the
+configuration file or user phrase data changes, the Server reloads the affected
+data and applies it to the active input controller and language model.
+
+This allows changes made outside the immediate key event path, such as saving
+settings from `ConfigApp` or updating user phrase files, to become visible to the
+running input method without requiring the foreground application or TSF Client
+to restart.
+
+## 5. Boundary Between State and Display
 
 The system has an important division of labor:
 
@@ -122,7 +184,7 @@ For example:
 
 This boundary is important because whether the Client creates a composition or performs a direct commit is determined by the payload contents, not directly by the state type name.
 
-## 5. Why Adopt Client/Server
+## 6. Why Adopt Client/Server
 
 Main reasons:
 
@@ -137,7 +199,7 @@ The cost is:
 - Must define a stable payload format.
 - Need to clearly define the mapping between server states and client behaviors.
 
-## 6. Internationalization (i18n)
+## 7. Internationalization (i18n)
 
 The project implements a native Windows i18n architecture to support multi-lingual environments (primarily Traditional Chinese and English).
 
@@ -145,16 +207,16 @@ The project implements a native Windows i18n architecture to support multi-lingu
 - **Resource Tables**: UI strings are moved into `.rc` resource files using `STRINGTABLE`. Multiple languages are defined using `LANGUAGE` blocks.
 - **Dynamic Loading**: Components load strings at runtime using `LoadStringW` (wrapped in `LoadLocalizedStringW`). This allows the IME UI to automatically switch languages based on the user's Windows display language without requiring separate builds.
 
-## 7. User Interface (UI) Layer
+## 8. User Interface (UI) Layer
 
-The UI layer is responsible for rendering the Candidate Window and Tooltip Window using modern Windows graphics APIs.
+The custom popup UI layer lives in the Server process. `CandidateWindow` and `TooltipWindow` are owned, rendered, moved, and hidden by `McBopomofoServer.exe`. The Client still participates in UI routing because only the TSF TIP DLL can safely inspect the focused TSF context and determine the caret or selection rectangle inside the foreground host process.
 
-- **Rendering Engine**: Uses **Direct2D** and **DirectWrite** for high-quality, hardware-accelerated text rendering.
-- **High DPI Support**: All UI coordinates and dimensions are calculated based on the system DPI scale to ensure crisp visuals on 4K or high-density displays.
+- **Rendering Engine**: The Server prefers **Direct2D** and **DirectWrite** for high-quality, hardware-accelerated text rendering, with a GDI compatibility path for hosts where D2D popups are not visible.
+- **High DPI Support**: Popup coordinates come from the Client's TSF geometry probing. Popup scaling is computed by the Server-owned popup windows with `GetDpiScaleForWindow()` and `WM_DPICHANGED`.
 - **Dark Mode Support**: The system automatically detects the Windows "App Mode" (Light/Dark) by querying the registry (`Personalize\AppsUseLightTheme`). UI colors, brushes, and backgrounds are dynamically adjusted to match the system theme.
 - **Layered Stacking**: Auxiliary windows (Tooltip and Candidate) are aware of each other's visibility and height, automatically stacking vertically to avoid overlap.
 
-## 8. Current Major Limitations
+## 9. Current Major Limitations
 
 Currently, the Server only maintains a single `InputController` instance, rather than splitting sessions "per input focus / per application context". This means the system architecture still leans toward a single interaction context, rather than comprehensive multi-session state management.
 

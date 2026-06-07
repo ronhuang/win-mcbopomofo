@@ -40,6 +40,7 @@ enum class Command : int {
   CMD_OPEN_SETTINGS = 4,
   CMD_GET_SETTINGS = 5,
   CMD_CLIENT_LOG = 6,
+  CMD_IS_PROCESS_DISABLED = 7,
 };
 
 enum class CandidateSelectionStyle : int {
@@ -53,6 +54,12 @@ struct KeyEventPayload {
   unsigned int ascii;
   bool shift;
   bool ctrl;
+  bool hasCoords = false;
+  uint64_t ownerHwnd = 0;
+  int anchorLeft = 0;
+  int anchorTop = 0;
+  int anchorRight = 0;
+  int anchorBottom = 0;
 };
 
 struct SelectCandidatePayload {
@@ -69,6 +76,16 @@ struct ClientLogPayload {
   std::string message;
 };
 
+struct ProcessDisabledQueryPayload {
+  std::string processName;
+};
+
+struct ProcessDisabledResponsePayload {
+  bool disabled = false;
+};
+
+
+
 struct CandidateWindowColors {
   uint32_t text = 0x101010;
   uint32_t background = 0xFFFFFF;
@@ -84,11 +101,10 @@ struct StateUpdatePayload {
   int cursorIndex = 0;
   int candidateIndex = -1;  // -1 means no candidate window
   int candidateFontSize = 16;
-  int markStart = -1;       // -1 means no mark
+  int markStart = -1;  // -1 means no mark
   int markEnd = -1;
   bool forceVertical = false;  // Add flag to force vertical layout
-  CandidateSelectionStyle selectionStyle =
-      CandidateSelectionStyle::kStandard;
+  CandidateSelectionStyle selectionStyle = CandidateSelectionStyle::kStandard;
   std::string tooltip;
   std::string hint;
   bool candidateWindowVertical = false;
@@ -139,6 +155,17 @@ bool DeserializeClientSettings(const std::string& data,
 std::string SerializeClientLog(const ClientLogPayload& payload);
 // Deserialize a relayed client log message
 bool DeserializeClientLog(const std::string& data, ClientLogPayload& payload);
+
+std::string SerializeProcessDisabledQuery(
+    const ProcessDisabledQueryPayload& payload);
+bool DeserializeProcessDisabledQuery(const std::string& data,
+                                     ProcessDisabledQueryPayload& payload);
+std::string SerializeProcessDisabledResponse(
+    const ProcessDisabledResponsePayload& payload);
+bool DeserializeProcessDisabledResponse(const std::string& data,
+                                        ProcessDisabledResponsePayload& payload);
+
+
 
 // Serialize a state update to a string
 std::string SerializeStateUpdate(const StateUpdatePayload& payload);
