@@ -6,6 +6,7 @@ Scripts in the repository root:
 
 - `install.ps1`: build all required binaries, stage files into `dist/`, register the TSF DLLs locally, restart TSF, and start `McBopomofoServer`.
 - `build_msi.ps1`: build the MSI installer from the staged binaries.
+- `clean.ps1`: remove all build-generated directories (`build_x64`, `build_x86`, `build_arm64`, `build_msi_generated`, `dist`). If you have previously run `install.ps1`, run `scripts\uninstall.ps1` first to unregister the TSF DLLs before cleaning.
 
 Scripts in this directory:
 

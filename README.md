@@ -22,6 +22,7 @@ Windows port of McBopomofo built on TSF.
     - [2. Build and Install Locally](#2-build-and-install-locally)
     - [3. Debugging](#3-debugging)
     - [4. Building the Installer](#4-building-the-installer)
+    - [Alternative: Building with Docker](#alternative-building-with-docker)
   - [Core Concept and Design Philosophy](#core-concept-and-design-philosophy)
     - [Extending the Input Method](#extending-the-input-method)
   - [Vocabulary and Language Model](#vocabulary-and-language-model)
@@ -137,6 +138,34 @@ This script will:
 - **Settings**: You can trigger the settings app from the language bar menu or by running `dist\McBopomofoConfig.exe`.
 - **Iterative Workflow**: After making code changes, simply run `.\install.ps1` again to rebuild and re-register the components.
 
+### Alternative: Building with Docker
+
+If you prefer not to install the toolchain locally, you can build inside a Windows container using the provided `Dockerfile`. This requires [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) switched to **Windows containers** mode.
+
+**First, build the image** (one-time, or when `Dockerfile` changes):
+
+```powershell
+docker build -t win-mcbopomofo-dev .
+```
+
+**Then initialise the submodule** (if you haven't already):
+
+```powershell
+git submodule update --init --recursive
+```
+
+**Run the build:**
+
+```powershell
+docker run --rm --isolation=hyperv `
+    -v "${PWD}:C:\src" `
+    -w C:\src `
+    win-mcbopomofo-dev `
+    powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The compiled binaries and data files will appear in `dist/` on your host machine. Note that the TSF DLL registration performed inside the container is ephemeral and does not affect your host system.
+
 ### 4. Building the Installer
 
 To generate the final MSI installer, run:
@@ -218,6 +247,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 - `install.ps1`: developer-oriented build and local staging flow
 - `build_msi.ps1`: build the MSI installer
+- `clean.ps1`: remove all build-generated directories (`build_x64`, `build_x86`, `build_arm64`, `build_msi_generated`, `dist`)
 - `scripts/setup.ps1`: install a staged build to a target directory
 - `scripts/uninstall.ps1`: unregister and remove an installed build
 
