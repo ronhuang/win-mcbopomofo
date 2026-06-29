@@ -8,3 +8,4 @@ set_target_properties(McBopomofoConfig PROPERTIES
     OUTPUT_NAME "McBopomofoConfig"
     WIN32_EXECUTABLE TRUE
 )
+target_link_options(McBopomofoConfig PRIVATE "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest")

@@ -38,6 +38,7 @@
 #include <mutex>
 #include <string>
 
+#include "../Common/DpiAwareness.h"
 #include "CandidateWindow.h"
 #include "CandidateWindowColors.h"
 #include "InputController.h"
@@ -398,24 +399,6 @@ static void RelaunchCurrentProcess() {
   }
 }
 
-static void EnablePerMonitorDpiAwareness() {
-  HMODULE user32 = GetModuleHandleW(L"user32.dll");
-  if (user32) {
-    using SetProcessDpiAwarenessContextFn =
-        BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
-    auto setProcessDpiAwarenessContext =
-        reinterpret_cast<SetProcessDpiAwarenessContextFn>(
-            GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
-    if (setProcessDpiAwarenessContext &&
-        setProcessDpiAwarenessContext(
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
-      return;
-    }
-  }
-
-  SetProcessDPIAware();
-}
-
 }  // namespace
 
 static bool IsSystemColorSettingsChange(UINT msg, LPARAM lParam) {
@@ -737,7 +720,7 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT msg, WPARAM wParam,
 }
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-  EnablePerMonitorDpiAwareness();
+  McBopomofo::DpiAwareness::EnablePerMonitorDpiAwareness();
 
   HANDLE hSingleInstanceMutex =
       CreateMutexW(nullptr, TRUE, kServerSingleInstanceMutexName);

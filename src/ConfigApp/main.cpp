@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "../Common/DpiAwareness.h"
 #include "../Common/UTFHelper.h"
 #include "ControlState.h"
 #include "Ipc.h"
@@ -1164,6 +1165,8 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+  McBopomofo::DpiAwareness::EnablePerMonitorDpiAwareness();
+
   HANDLE hSingleInstanceMutex =
       CreateMutexW(nullptr, TRUE, kSingleInstanceMutexName);
   if (hSingleInstanceMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
