@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Minimum Windows version: Windows 10 1903 (build 18362)
+# Sets both the MSBuild target platform and the C++ _WIN32_WINNT defines
+set(CMAKE_SYSTEM_VERSION "10.0.18362")
+
 project(WinMcBopomofo VERSION 1.0.0 LANGUAGES CXX C)
 
 set(WINMCBOPOMOFO_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
