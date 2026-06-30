@@ -59,72 +59,12 @@ constexpr const wchar_t* kSingleInstanceMutexName =
 constexpr int kReloadCommand = IDC_RELOAD_BUTTON;
 constexpr int kManualLinkCommand = IDC_MANUAL_LINK;
 constexpr int kProjectHomepageCommand = IDC_PROJECT_HOMEPAGE_LINK;
-constexpr int kScrollLineHeight = 20;  // pixels per scroll line
+constexpr int kScrollLineHeight = 20;
 constexpr const wchar_t* kManualUrl =
     L"https://github.com/openvanilla/McBopomofo/wiki/"
     L"%E4%BD%BF%E7%94%A8%E6%89%8B%E5%86%8A";
 constexpr const wchar_t* kProjectHomepageUrl =
     L"https://github.com/openvanilla/win-mcbopomofo";
-
-// Light Mode Colors
-constexpr COLORREF kLightWindowColor = RGB(246, 247, 249);
-constexpr COLORREF kLightTextColor = RGB(32, 33, 36);
-constexpr COLORREF kLightControlColor = RGB(255, 255, 255);
-
-// Dark Mode Colors
-constexpr COLORREF kDarkWindowColor = RGB(32, 33, 36);
-constexpr COLORREF kDarkTextColor = RGB(232, 234, 237);
-constexpr COLORREF kDarkControlColor = RGB(45, 46, 50);
-
-COLORREF g_WindowColor = kLightWindowColor;
-COLORREF g_TextColor = kLightTextColor;
-COLORREF g_ControlColor = kLightControlColor;
-HBRUSH g_WindowBrush = nullptr;
-HBRUSH g_ControlBrush = nullptr;
-bool g_DarkMode = false;
-int g_ScrollPos = 0;  // Current vertical scroll position
-int g_ContentHeight = 0;
-std::vector<std::pair<HWND, RECT>> g_ChildBaseRects;
-
-bool IsDarkModeEnabled() {
-  HKEY hKey;
-  DWORD value = 0;
-  DWORD size = sizeof(value);
-  if (RegOpenKeyExW(
-          HKEY_CURRENT_USER,
-          L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-          0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-    RegQueryValueExW(hKey, L"AppsUseLightTheme", nullptr, nullptr,
-                     reinterpret_cast<LPBYTE>(&value), &size);
-    RegCloseKey(hKey);
-  }
-  return value == 0;
-}
-
-void UpdateThemeColors() {
-  g_DarkMode = IsDarkModeEnabled();
-  if (g_DarkMode) {
-    g_WindowColor = kDarkWindowColor;
-    g_TextColor = kDarkTextColor;
-    g_ControlColor = kDarkControlColor;
-  } else {
-    g_WindowColor = kLightWindowColor;
-    g_TextColor = kLightTextColor;
-    g_ControlColor = kLightControlColor;
-  }
-  if (g_WindowBrush) DeleteObject(g_WindowBrush);
-  if (g_ControlBrush) DeleteObject(g_ControlBrush);
-  g_WindowBrush = CreateSolidBrush(g_WindowColor);
-  g_ControlBrush = CreateSolidBrush(g_ControlColor);
-}
-
-void ApplyThemeToWindow(HWND hwnd) {
-  BOOL dark = g_DarkMode;
-  DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark,
-                        sizeof(dark));
-  SetWindowTheme(hwnd, g_DarkMode ? L"DarkMode_Explorer" : L"Explorer",
-                 nullptr);
-}
 
 struct ComboOption {
   UINT labelId;
@@ -151,9 +91,9 @@ const std::array<UINT, 2> kInputModeLabels = {{
 }};
 
 const std::array<ComboOption, 3> kCandidateKeyOptions = {{
-    {0, "123456789"},  // Not localized
-    {0, "asdfghjkl"},  // Not localized
-    {0, "asdfzxcvb"},  // Not localized
+    {0, "123456789"},
+    {0, "asdfghjkl"},
+    {0, "asdfzxcvb"},
 }};
 
 const std::array<CtrlEnterOption, 6> kCtrlEnterOptions = {{
@@ -199,16 +139,11 @@ HWND hManualLink = nullptr;
 HWND hProjectHomepageLink = nullptr;
 HWND hReloadBtn = nullptr;
 HWND hCandidateKeysCountCombo = nullptr;
-HFONT hUiFont = nullptr;
-HFONT hTitleFont = nullptr;
 HFONT hLinkFont = nullptr;
 Settings settings;
-std::vector<HWND> g_ThemedControls;
-std::vector<HWND> g_TextControls;
-std::vector<HWND> g_GroupBoxes;
-std::vector<HWND> g_LinkLabels;
-std::vector<HWND> g_ComboBoxes;
-std::vector<HWND> g_Separators;
+int g_ScrollPos = 0;
+int g_ContentHeight = 0;
+std::vector<std::pair<HWND, RECT>> g_ChildBaseRects;
 int g_FixedWidth = 0;
 
 bool IsRadioButton(HWND hwnd) {
@@ -242,10 +177,6 @@ void CenterWindow(HWND hwnd) {
   SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
 }
 
-int Scale(int value);
-bool ContainsControl(const std::vector<HWND>& controls, HWND hwnd);
-void ApplyThemeToCombo(HWND combo);
-
 int MaxScrollPos(const SCROLLINFO& si) {
   return std::max(0, si.nMax - static_cast<int>(si.nPage) + 1);
 }
@@ -269,7 +200,7 @@ void CacheChildBaseRects(HWND hwnd) {
     g_ContentHeight =
         std::max(g_ContentHeight, static_cast<int>(rect.bottom));
   }
-  g_ContentHeight += Scale(20);
+  g_ContentHeight += 20;
 }
 
 void ReflowChildControls(int scrollPos) {
@@ -311,80 +242,6 @@ void ApplyVerticalScroll(HWND hwnd, int requestedPos) {
   InvalidateRect(hwnd, nullptr, TRUE);
 }
 
-void TrackContentBottom(int y, int height) {
-  g_ContentHeight = std::max(g_ContentHeight, Scale(y + height));
-}
-
-int Scale(int value) {
-  HDC hdc = GetDC(nullptr);
-  int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSX) : 96;
-  if (hdc) {
-    ReleaseDC(nullptr, hdc);
-  }
-  return MulDiv(value, dpi, 96);
-}
-
-HFONT CreateUIFont(int pointSize, int weight, bool underline = false) {
-  HDC hdc = GetDC(nullptr);
-  int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
-  if (hdc) {
-    ReleaseDC(nullptr, hdc);
-  }
-
-  const wchar_t* fontName = L"Microsoft JhengHei";
-  LANGID langId = GetUserDefaultUILanguage();
-  if (PRIMARYLANGID(langId) == LANG_ENGLISH) {
-    fontName = L"Arial";
-    pointSize = 10;
-  } else {
-    pointSize = 11;
-  }
-
-  return CreateFontW(-MulDiv(pointSize, dpi, 72), 0, 0, 0, weight, FALSE,
-                     underline, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                     DEFAULT_PITCH | FF_DONTCARE, fontName);
-}
-
-void ApplyFont(HWND hwnd, HFONT font = nullptr) {
-  SendMessageW(hwnd, WM_SETFONT,
-               reinterpret_cast<WPARAM>(font ? font : hUiFont), TRUE);
-}
-
-HWND TrackControl(HWND hwnd, HFONT font = nullptr) {
-  ApplyFont(hwnd, font);
-  g_ThemedControls.push_back(hwnd);
-  return hwnd;
-}
-
-HWND TrackTextControl(HWND hwnd, HFONT font = nullptr) {
-  ApplyFont(hwnd, font);
-  g_TextControls.push_back(hwnd);
-  return hwnd;
-}
-
-void ApplyThemeToControls() {
-  const wchar_t* theme = g_DarkMode ? L"DarkMode_Explorer" : L"Explorer";
-  for (HWND control : g_ThemedControls) {
-    if (control && IsWindow(control)) {
-      if (ContainsControl(g_ComboBoxes, control)) {
-        ApplyThemeToCombo(control);
-      } else if (IsRadioButton(control)) {
-        SetWindowTheme(control, L"", L"");
-      } else {
-        SetWindowTheme(control, theme, nullptr);
-      }
-      InvalidateRect(control, nullptr, TRUE);
-    }
-  }
-  for (HWND control : g_TextControls) {
-    if (control && IsWindow(control)) {
-      SetWindowTheme(control, L"", L"");
-      InvalidateRect(control, nullptr, TRUE);
-    }
-  }
-}
-
 void AddComboString(HWND combo, const wchar_t* text) {
   SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text));
 }
@@ -404,259 +261,54 @@ void SetChecked(HWND control, bool checked) {
       control, checked, IsRadioButton(control) || IsCheckButton(control));
 }
 
-HWND CreateLabel(HWND parent, const wchar_t* text, int x, int y, int width) {
-  TrackContentBottom(y, 26);
-  return TrackControl(CreateWindowW(
-      L"Static", text, WS_VISIBLE | WS_CHILD | SS_LEFTNOWORDWRAP, Scale(x),
-      Scale(y), Scale(width), Scale(26), parent, nullptr, nullptr, nullptr));
-}
-
-HWND CreateSectionTitle(HWND parent, const wchar_t* text, int x, int y,
-                        int width) {
-  TrackContentBottom(y, 24);
-  return TrackControl(
-      CreateWindowW(L"Static", text, WS_VISIBLE | WS_CHILD | SS_LEFTNOWORDWRAP,
-                    Scale(x), Scale(y), Scale(width), Scale(24), parent,
-                    nullptr, nullptr, nullptr),
-      hTitleFont);
-}
-
-HWND CreateGroup(HWND parent, int x, int y, int width, int height) {
-  TrackContentBottom(y, height);
-  HWND group = CreateWindowW(
-      L"Button", L"", WS_VISIBLE | WS_CHILD | BS_GROUPBOX | BS_OWNERDRAW,
-      Scale(x), Scale(y), Scale(width), Scale(height), parent, nullptr, nullptr,
-      nullptr);
-  g_GroupBoxes.push_back(group);
-  return TrackControl(group);
-}
-
-HWND CreateCombo(HWND parent, int x, int y, int width) {
-  TrackContentBottom(y, 24);
-  HWND combo = CreateWindowW(
-      L"ComboBox", L"", WS_VISIBLE | WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST,
-      Scale(x), Scale(y), Scale(width), Scale(180), parent, nullptr, nullptr,
-      nullptr);
-  g_ComboBoxes.push_back(combo);
-  ApplyThemeToCombo(combo);
-  return TrackControl(combo);
-}
-
-HWND CreateCheck(HWND parent, const wchar_t* text, int x, int y, int width) {
-  TrackContentBottom(y, 24);
-  HWND check = CreateWindowW(L"Button", text,
-                             WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX,
-                             Scale(x), Scale(y), Scale(width), Scale(24), parent,
-                             nullptr, nullptr, nullptr);
-  return TrackControl(check);
-}
-
-HWND CreateRadio(HWND parent, const wchar_t* text, int x, int y, int width,
-                 bool startsGroup) {
-  TrackContentBottom(y, 24);
-  DWORD style =
-      WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTORADIOBUTTON;
-  if (startsGroup) {
-    style |= WS_GROUP;
+bool IsDarkModeEnabled() {
+  HKEY hKey;
+  DWORD value = 0;
+  DWORD size = sizeof(value);
+  if (RegOpenKeyExW(
+          HKEY_CURRENT_USER,
+          L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+          0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+    RegQueryValueExW(hKey, L"AppsUseLightTheme", nullptr, nullptr,
+                     reinterpret_cast<LPBYTE>(&value), &size);
+    RegCloseKey(hKey);
   }
-  HWND radio =
-      CreateWindowW(L"Button", text, style, Scale(x), Scale(y), Scale(width),
-                    Scale(24), parent, nullptr, nullptr, nullptr);
-  return TrackControl(radio);
+  return value == 0;
 }
 
-HWND CreateLink(HWND parent, const wchar_t* text, int x, int y, int width,
-                int commandId) {
-  TrackContentBottom(y, 22);
-  HWND link = CreateWindowW(
-      L"Static", text, WS_VISIBLE | WS_CHILD | WS_TABSTOP | SS_NOTIFY, Scale(x),
-      Scale(y), Scale(width), Scale(22), parent,
-      reinterpret_cast<HMENU>(static_cast<INT_PTR>(commandId)), nullptr,
-      nullptr);
-  ApplyFont(link, hLinkFont);
-  g_LinkLabels.push_back(link);
-  return link;
+void ApplyDarkModeToWindow(HWND hwnd) {
+  BOOL dark = IsDarkModeEnabled();
+  DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark,
+                        sizeof(dark));
 }
 
-HWND CreateSeparator(HWND parent, int x, int y, int width) {
-  TrackContentBottom(y, 8);
-  HWND separator = CreateWindowW(L"Static", L"",
-                                 WS_VISIBLE | WS_CHILD | SS_OWNERDRAW,
-                                 Scale(x), Scale(y), Scale(width), Scale(8),
-                                 parent, nullptr, nullptr, nullptr);
-  g_Separators.push_back(separator);
-  return separator;
-}
-
-bool ContainsControl(const std::vector<HWND>& controls, HWND hwnd) {
-  return std::find(controls.begin(), controls.end(), hwnd) != controls.end();
-}
-
-void ApplyThemeToCombo(HWND combo) {
-  const wchar_t* theme = g_DarkMode ? L"DarkMode_CFD" : L"CFD";
-  SetWindowTheme(combo, theme, nullptr);
-
-  COMBOBOXINFO info = {sizeof(COMBOBOXINFO)};
-  if (!GetComboBoxInfo(combo, &info)) {
+void ApplyThemeToControl(HWND control) {
+  if (!control) {
     return;
   }
-  if (info.hwndList) {
-    SetWindowTheme(info.hwndList, theme, nullptr);
-  }
-  if (info.hwndItem) {
-    SetWindowTheme(info.hwndItem, theme, nullptr);
-  }
+  bool dark = IsDarkModeEnabled();
+  const wchar_t* theme = dark ? L"DarkMode_Explorer" : L"Explorer";
+  SetWindowTheme(control, theme, nullptr);
 }
 
-void DrawControlText(HDC hdc, HWND hwnd, RECT rect, UINT format) {
-  wchar_t text[256] = {};
-  GetWindowTextW(hwnd, text, static_cast<int>(std::size(text)));
-  HFONT font = reinterpret_cast<HFONT>(SendMessageW(hwnd, WM_GETFONT, 0, 0));
-  HFONT oldFont =
-      font ? reinterpret_cast<HFONT>(SelectObject(hdc, font)) : nullptr;
-  SetBkMode(hdc, TRANSPARENT);
-  SetTextColor(hdc, g_TextColor);
-  DrawTextW(hdc, text, -1, &rect, format);
-  if (oldFont) {
-    SelectObject(hdc, oldFont);
-  }
-}
+void ApplyThemeToDialogAndChildren(HWND hwnd) {
+  ApplyDarkModeToWindow(hwnd);
+  bool dark = IsDarkModeEnabled();
+  const wchar_t* theme = dark ? L"DarkMode_Explorer" : L"Explorer";
 
-void DrawCheckGlyph(HDC hdc, RECT rect, bool checked) {
-  COLORREF fillColor = g_DarkMode ? RGB(45, 46, 50) : RGB(255, 255, 255);
-  COLORREF borderColor = g_DarkMode ? RGB(154, 160, 166) : RGB(95, 99, 104);
-  COLORREF checkColor = g_DarkMode ? RGB(138, 180, 248) : RGB(0, 102, 204);
-
-  HBRUSH fillBrush = CreateSolidBrush(fillColor);
-  FillRect(hdc, &rect, fillBrush);
-  DeleteObject(fillBrush);
-
-  HPEN borderPen = CreatePen(PS_SOLID, Scale(1), borderColor);
-  HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-  HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
-  Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
-  SelectObject(hdc, oldBrush);
-  SelectObject(hdc, oldPen);
-  DeleteObject(borderPen);
-
-  if (!checked) {
-    return;
-  }
-
-  HPEN checkPen = CreatePen(PS_SOLID, std::max(Scale(2), 2), checkColor);
-  oldPen = SelectObject(hdc, checkPen);
-  MoveToEx(hdc, rect.left + Scale(4), rect.top + Scale(8), nullptr);
-  LineTo(hdc, rect.left + Scale(7), rect.top + Scale(11));
-  LineTo(hdc, rect.right - Scale(4), rect.top + Scale(4));
-  SelectObject(hdc, oldPen);
-  DeleteObject(checkPen);
-}
-
-void DrawRadioGlyph(HDC hdc, RECT rect, bool checked) {
-  COLORREF fillColor = g_DarkMode ? RGB(45, 46, 50) : RGB(255, 255, 255);
-  COLORREF borderColor = g_DarkMode ? RGB(154, 160, 166) : RGB(95, 99, 104);
-  COLORREF dotColor = g_DarkMode ? RGB(138, 180, 248) : RGB(0, 102, 204);
-
-  HBRUSH fillBrush = CreateSolidBrush(fillColor);
-  HPEN borderPen = CreatePen(PS_SOLID, Scale(1), borderColor);
-  HGDIOBJ oldBrush = SelectObject(hdc, fillBrush);
-  HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-  Ellipse(hdc, rect.left, rect.top, rect.right, rect.bottom);
-  SelectObject(hdc, oldPen);
-  SelectObject(hdc, oldBrush);
-  DeleteObject(borderPen);
-  DeleteObject(fillBrush);
-
-  if (!checked) {
-    return;
-  }
-
-  RECT dotRect = rect;
-  InflateRect(&dotRect, -Scale(5), -Scale(5));
-  HBRUSH dotBrush = CreateSolidBrush(dotColor);
-  HGDIOBJ oldDotBrush = SelectObject(hdc, dotBrush);
-  HGDIOBJ oldDotPen = SelectObject(hdc, GetStockObject(NULL_PEN));
-  Ellipse(hdc, dotRect.left, dotRect.top, dotRect.right, dotRect.bottom);
-  SelectObject(hdc, oldDotPen);
-  SelectObject(hdc, oldDotBrush);
-  DeleteObject(dotBrush);
-}
-
-void DrawOwnerDrawButton(const DRAWITEMSTRUCT* item) {
-  HDC hdc = item->hDC;
-  RECT rect = item->rcItem;
-  FillRect(hdc, &rect, g_WindowBrush);
-
-  if (IsRadioButton(item->hwndItem) || IsCheckButton(item->hwndItem)) {
-    RECT glyphRect = rect;
-    glyphRect.right = glyphRect.left + Scale(16);
-    int glyphHeight = Scale(16);
-    int controlHeight = rect.bottom - rect.top;
-    glyphRect.top = rect.top + (controlHeight - glyphHeight) / 2;
-    glyphRect.bottom = glyphRect.top + glyphHeight;
-
-    bool checked = IsChecked(item->hwndItem);
-    if (IsRadioButton(item->hwndItem)) {
-      DrawRadioGlyph(hdc, glyphRect, checked);
-    } else {
-      DrawCheckGlyph(hdc, glyphRect, checked);
+  for (HWND child : {hReloadBtn, hModeCombo, hLayoutCombo, hCandidateKeysCombo,
+                     hChooseSpaceCheck, hCandidateKeysCountCombo,
+                     hSelectionActionCombo, hSelectBeforeRadio,
+                     hSelectAfterRadio, hMoveCursorCheck, hVerticalRadio,
+                     hHorizontalRadio, hCandidateFontSizeCombo,
+                     hShiftToggleCheck, hUppercaseRadio, hLowercaseRadio,
+                     hShiftEnterCheck, hEscClearCheck, hCtrlEnterCombo,
+                     hRepeatedPunctuationCheck, hErrorBeepCheck}) {
+    if (child) {
+      SetWindowTheme(child, theme, nullptr);
     }
-
-    RECT textRect = rect;
-    textRect.left = glyphRect.right + Scale(8);
-    DrawControlText(hdc, item->hwndItem, textRect,
-                    DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
-
-    if ((item->itemState & ODS_FOCUS) != 0) {
-      DrawFocusRect(hdc, &textRect);
-    }
-    return;
   }
-
-  if (ContainsControl(g_Separators, item->hwndItem)) {
-    RECT lineRect = rect;
-    lineRect.top = rect.top + ((rect.bottom - rect.top) / 2);
-    lineRect.bottom = lineRect.top + 1;
-    HBRUSH lineBrush = CreateSolidBrush(g_DarkMode ? RGB(92, 94, 99)
-                                                   : RGB(210, 214, 220));
-    FillRect(hdc, &lineRect, lineBrush);
-    DeleteObject(lineBrush);
-    return;
-  }
-
-  if (ContainsControl(g_GroupBoxes, item->hwndItem)) {
-    HPEN pen = CreatePen(PS_SOLID, 1,
-                         g_DarkMode ? RGB(92, 94, 99) : RGB(210, 214, 220));
-    HGDIOBJ oldPen = SelectObject(hdc, pen);
-    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
-    Rectangle(hdc, rect.left, rect.top + Scale(8), rect.right, rect.bottom);
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
-    DeleteObject(pen);
-    return;
-  }
-
-  COLORREF buttonColor =
-      g_DarkMode ? RGB(55, 57, 62) : RGB(255, 255, 255);
-  HBRUSH buttonBrush = CreateSolidBrush(buttonColor);
-  FillRect(hdc, &rect, buttonBrush);
-  DeleteObject(buttonBrush);
-
-  HPEN pen = CreatePen(PS_SOLID, 1,
-                       g_DarkMode ? RGB(105, 107, 112) : RGB(196, 200, 207));
-  HGDIOBJ oldPen = SelectObject(hdc, pen);
-  HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
-  Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
-  SelectObject(hdc, oldBrush);
-  SelectObject(hdc, oldPen);
-  DeleteObject(pen);
-
-  DrawControlText(hdc, item->hwndItem, rect,
-                  DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_END_ELLIPSIS);
-  if ((item->itemState & ODS_FOCUS) != 0) {
-    InflateRect(&rect, -Scale(4), -Scale(4));
-    DrawFocusRect(hdc, &rect);
-  }
+  InvalidateRect(hwnd, nullptr, TRUE);
 }
 
 void SetLayoutSelection() {
@@ -803,13 +455,8 @@ void SaveAndNotify() {
   NotifyServer();
 }
 
-HWND BindControl(HWND parent, int id, HFONT font = nullptr) {
-  HWND control = GetDlgItem(parent, id);
-  if (control == nullptr) {
-    return nullptr;
-  }
-  TrackControl(control, font);
-  return control;
+HWND BindControl(HWND parent, int id) {
+  return GetDlgItem(parent, id);
 }
 
 void LocalizeControls(HWND hwnd) {
@@ -885,93 +532,34 @@ void InitializeComboContents() {
 }
 
 void BindControls(HWND hwnd) {
-  g_ThemedControls.clear();
-  g_TextControls.clear();
-  g_GroupBoxes.clear();
-  g_LinkLabels.clear();
-  g_ComboBoxes.clear();
-  g_Separators.clear();
-
   hReloadBtn = BindControl(hwnd, IDC_RELOAD_BUTTON);
-  TrackTextControl(BindControl(hwnd, IDC_INPUT_MODE_LABEL));
   hModeCombo = BindControl(hwnd, IDC_INPUT_MODE_COMBO);
-  g_ComboBoxes.push_back(hModeCombo);
-  TrackTextControl(BindControl(hwnd, IDC_KEYBOARD_LAYOUT_LABEL));
   hLayoutCombo = BindControl(hwnd, IDC_KEYBOARD_LAYOUT_COMBO);
-  g_ComboBoxes.push_back(hLayoutCombo);
-  TrackTextControl(BindControl(hwnd, IDC_SELECTION_KEYS_LABEL));
   hCandidateKeysCombo = BindControl(hwnd, IDC_SELECTION_KEYS_COMBO);
-  g_ComboBoxes.push_back(hCandidateKeysCombo);
   hChooseSpaceCheck = BindControl(hwnd, IDC_CHOOSE_SPACE_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_CANDIDATES_PER_PAGE_LABEL));
   hCandidateKeysCountCombo = BindControl(hwnd, IDC_CANDIDATES_PER_PAGE_COMBO);
-  g_ComboBoxes.push_back(hCandidateKeysCountCombo);
-  TrackTextControl(BindControl(hwnd, IDC_SELECTION_ACTION_LABEL));
   hSelectionActionCombo = BindControl(hwnd, IDC_SELECTION_ACTION_COMBO);
-  g_ComboBoxes.push_back(hSelectionActionCombo);
-  TrackTextControl(BindControl(hwnd, IDC_SELECTION_CURSOR_LABEL));
   hSelectBeforeRadio = BindControl(hwnd, IDC_SELECT_BEFORE_RADIO);
   hSelectAfterRadio = BindControl(hwnd, IDC_SELECT_AFTER_RADIO);
   hMoveCursorCheck = BindControl(hwnd, IDC_MOVE_CURSOR_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_CANDIDATE_PRESENTATION_LABEL));
   hVerticalRadio = BindControl(hwnd, IDC_VERTICAL_RADIO);
   hHorizontalRadio = BindControl(hwnd, IDC_HORIZONTAL_RADIO);
-  TrackTextControl(BindControl(hwnd, IDC_CANDIDATE_FONT_SIZE_LABEL));
   hCandidateFontSizeCombo = BindControl(hwnd, IDC_CANDIDATE_FONT_SIZE_COMBO);
-  g_ComboBoxes.push_back(hCandidateFontSizeCombo);
-  TrackTextControl(BindControl(hwnd, IDC_SHIFT_TOGGLE_LABEL));
   hShiftToggleCheck = BindControl(hwnd, IDC_SHIFT_TOGGLE_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_SHIFT_LETTER_LABEL));
   hUppercaseRadio = BindControl(hwnd, IDC_SHIFT_LETTER_UPPER_RADIO);
   hLowercaseRadio = BindControl(hwnd, IDC_SHIFT_LETTER_LOWER_RADIO);
-  TrackTextControl(BindControl(hwnd, IDC_SHIFT_ENTER_LABEL));
   hShiftEnterCheck = BindControl(hwnd, IDC_SHIFT_ENTER_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_ESC_LABEL));
   hEscClearCheck = BindControl(hwnd, IDC_ESC_CLEAR_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_CTRL_ENTER_LABEL));
   hCtrlEnterCombo = BindControl(hwnd, IDC_CTRL_ENTER_COMBO);
-  g_ComboBoxes.push_back(hCtrlEnterCombo);
-  TrackTextControl(BindControl(hwnd, IDC_CANDIDATES_PUNCTUATION_LABEL));
   hRepeatedPunctuationCheck = BindControl(hwnd, IDC_REPEATED_PUNCTUATION_CHECK);
-  TrackTextControl(BindControl(hwnd, IDC_ERROR_BEEP_LABEL));
   hErrorBeepCheck = BindControl(hwnd, IDC_ERROR_BEEP_CHECK);
-  hManualLink = TrackTextControl(BindControl(hwnd, IDC_MANUAL_LINK, hLinkFont));
-  hProjectHomepageLink =
-      TrackTextControl(BindControl(hwnd, IDC_PROJECT_HOMEPAGE_LINK, hLinkFont));
-  g_LinkLabels.push_back(hManualLink);
-  g_LinkLabels.push_back(hProjectHomepageLink);
-
-  for (HWND control : {
-           hChooseSpaceCheck, hSelectBeforeRadio, hSelectAfterRadio,
-           hMoveCursorCheck, hVerticalRadio, hHorizontalRadio,
-           hShiftToggleCheck, hUppercaseRadio, hLowercaseRadio,
-           hShiftEnterCheck, hEscClearCheck, hRepeatedPunctuationCheck,
-           hErrorBeepCheck}) {
-    if (control != nullptr) {
-      LONG_PTR style = GetWindowLongPtrW(control, GWL_STYLE);
-      SetWindowLongPtrW(control, GWL_STYLE,
-                        (style & ~BS_TYPEMASK) | BS_OWNERDRAW);
-    }
-  }
-
-  for (HWND control : {hReloadBtn, hModeCombo, hLayoutCombo, hCandidateKeysCombo,
-                       hChooseSpaceCheck, hCandidateKeysCountCombo,
-                       hSelectionActionCombo, hSelectBeforeRadio,
-                       hSelectAfterRadio, hMoveCursorCheck, hVerticalRadio,
-                       hHorizontalRadio, hCandidateFontSizeCombo,
-                       hShiftToggleCheck, hUppercaseRadio, hLowercaseRadio,
-                       hShiftEnterCheck, hEscClearCheck, hCtrlEnterCombo,
-                       hRepeatedPunctuationCheck, hErrorBeepCheck}) {
-    if (control != nullptr) {
-      SetWindowTheme(control, g_DarkMode ? L"DarkMode_Explorer" : L"Explorer",
-                     nullptr);
-    }
-  }
+  hManualLink = BindControl(hwnd, IDC_MANUAL_LINK);
+  hProjectHomepageLink = BindControl(hwnd, IDC_PROJECT_HOMEPAGE_LINK);
 
   InitializeComboContents();
   LocalizeControls(hwnd);
   UpdateUI();
-  ApplyThemeToControls();
+  ApplyThemeToDialogAndChildren(hwnd);
   CacheChildBaseRects(hwnd);
   ReflowChildControls(g_ScrollPos);
 }
@@ -981,8 +569,18 @@ void BindControls(HWND hwnd) {
 INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
     case WM_INITDIALOG:
-      ApplyThemeToWindow(hwnd);
+      {
+        HDC hdc = GetDC(hwnd);
+        int dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+        if (hdc) ReleaseDC(hwnd, hdc);
+        hLinkFont = CreateFontW(-MulDiv(11, dpi, 72), 0, 0, 0, FW_NORMAL, TRUE,
+                                FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+      }
       BindControls(hwnd);
+      if (hManualLink) SendMessageW(hManualLink, WM_SETFONT, reinterpret_cast<WPARAM>(hLinkFont), TRUE);
+      if (hProjectHomepageLink) SendMessageW(hProjectHomepageLink, WM_SETFONT, reinterpret_cast<WPARAM>(hLinkFont), TRUE);
       CenterWindow(hwnd);
       {
         RECT rect;
@@ -991,22 +589,16 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
       }
       return TRUE;
-    case WM_DRAWITEM:
-      DrawOwnerDrawButton(reinterpret_cast<const DRAWITEMSTRUCT*>(lParam));
-      return TRUE;
     case WM_CLOSE:
       DestroyWindow(hwnd);
       return TRUE;
     case WM_GETMINMAXINFO: {
       MINMAXINFO* pMinMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
-      // Fix window width - cannot be resized horizontally
-      int fixedWidth = g_FixedWidth > 0 ? g_FixedWidth : Scale(550);
+      int fixedWidth = g_FixedWidth > 0 ? g_FixedWidth : 550;
       pMinMaxInfo->ptMinTrackSize.x = fixedWidth;
       pMinMaxInfo->ptMaxTrackSize.x = fixedWidth;
-      // Allow height adjustment while keeping the layout usable on smaller
-      // laptops.
-      pMinMaxInfo->ptMinTrackSize.y = Scale(460);
-      pMinMaxInfo->ptMaxTrackSize.y = Scale(760);
+      pMinMaxInfo->ptMinTrackSize.y = 460;
+      pMinMaxInfo->ptMaxTrackSize.y = 760;
       break;
     }
     case WM_SIZE: {
@@ -1029,7 +621,7 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     case WM_MOUSEWHEEL: {
       int wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
-      int scrollLines = wheelDelta > 0 ? -3 : 3;  // Scroll up or down
+      int scrollLines = wheelDelta > 0 ? -3 : 3;
 
       ApplyVerticalScroll(hwnd, g_ScrollPos + scrollLines * kScrollLineHeight);
       break;
@@ -1065,43 +657,26 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_SETTINGCHANGE:
       if (lParam && wcscmp(reinterpret_cast<LPCWSTR>(lParam),
                            L"ImmersiveColorSet") == 0) {
-        UpdateThemeColors();
-        ApplyThemeToWindow(hwnd);
-        ApplyThemeToControls();
-        InvalidateRect(hwnd, nullptr, TRUE);
+        ApplyThemeToDialogAndChildren(hwnd);
       }
       break;
     case WM_CTLCOLORSTATIC: {
-      HDC hdc = reinterpret_cast<HDC>(wParam);
-      SetBkMode(hdc, TRANSPARENT);
       HWND control = reinterpret_cast<HWND>(lParam);
-      if (ContainsControl(g_LinkLabels, control)) {
+      if (control == hManualLink || control == hProjectHomepageLink) {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
         SetTextColor(hdc, RGB(0, 102, 204));
-      } else {
-        SetTextColor(hdc, g_TextColor);
+        SetBkMode(hdc, TRANSPARENT);
+        return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
       }
-      return reinterpret_cast<LRESULT>(g_WindowBrush);
+      return FALSE;
     }
-    case WM_CTLCOLORBTN: {
-      HDC hdc = reinterpret_cast<HDC>(wParam);
-      SetBkMode(hdc, TRANSPARENT);
-      SetTextColor(hdc, g_TextColor);
-      return reinterpret_cast<LRESULT>(g_WindowBrush);
-    }
-    case WM_CTLCOLOREDIT:
-    case WM_CTLCOLORLISTBOX: {
-      HDC hdc = reinterpret_cast<HDC>(wParam);
-      SetBkMode(hdc, OPAQUE);
-      SetBkColor(hdc, g_ControlColor);
-      SetTextColor(hdc, g_TextColor);
-      return reinterpret_cast<LRESULT>(g_ControlBrush);
-    }
-    case WM_ERASEBKGND: {
-      RECT rect;
-      GetClientRect(hwnd, &rect);
-      FillRect(reinterpret_cast<HDC>(wParam), &rect, g_WindowBrush);
-      return 1;
-    }
+    case WM_SETCURSOR:
+      if (reinterpret_cast<HWND>(wParam) == hManualLink ||
+          reinterpret_cast<HWND>(wParam) == hProjectHomepageLink) {
+        SetCursor(LoadCursor(nullptr, IDC_HAND));
+        return TRUE;
+      }
+      return FALSE;
     case WM_COMMAND:
       if (LOWORD(wParam) == kReloadCommand) {
         UpdateUI();
@@ -1138,24 +713,10 @@ INT_PTR CALLBACK DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           SetChecked(clickedControl, !IsChecked(clickedControl));
         }
         SaveAndNotify();
-        if (IsRadioButton(clickedControl)) {
-          InvalidateRect(hVerticalRadio, nullptr, TRUE);
-          InvalidateRect(hHorizontalRadio, nullptr, TRUE);
-          InvalidateRect(hSelectBeforeRadio, nullptr, TRUE);
-          InvalidateRect(hSelectAfterRadio, nullptr, TRUE);
-          InvalidateRect(hUppercaseRadio, nullptr, TRUE);
-          InvalidateRect(hLowercaseRadio, nullptr, TRUE);
-        } else if (IsCheckButton(clickedControl)) {
-          InvalidateRect(clickedControl, nullptr, TRUE);
-        }
       }
       return TRUE;
     case WM_DESTROY:
-      DeleteObject(hUiFont);
-      DeleteObject(hTitleFont);
-      DeleteObject(hLinkFont);
-      DeleteObject(g_WindowBrush);
-      DeleteObject(g_ControlBrush);
+      if (hLinkFont) DeleteObject(hLinkFont);
       PostQuitMessage(0);
       return TRUE;
     default:
@@ -1186,11 +747,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                               ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES};
   InitCommonControlsEx(&icc);
 
-  UpdateThemeColors();
-
-  hUiFont = CreateUIFont(11, FW_NORMAL);
-  hTitleFont = CreateUIFont(11, FW_BOLD);
-  hLinkFont = CreateUIFont(11, FW_NORMAL, true);
   std::wstring windowTitle = LoadLocalizedStringW(hInstance, IDS_CONFIG_TITLE);
   HWND hwnd = CreateDialogParamW(hInstance, MAKEINTRESOURCEW(IDD_CONFIG_DIALOG),
                                  nullptr, DlgProc, 0);
@@ -1199,11 +755,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
       ReleaseMutex(hSingleInstanceMutex);
       CloseHandle(hSingleInstanceMutex);
     }
-    DeleteObject(hUiFont);
-    DeleteObject(hTitleFont);
-    DeleteObject(hLinkFont);
-    DeleteObject(g_WindowBrush);
-    DeleteObject(g_ControlBrush);
     return 0;
   }
   SetWindowTextW(hwnd, windowTitle.c_str());
