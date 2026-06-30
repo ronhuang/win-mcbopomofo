@@ -91,9 +91,9 @@ function Build-Architecture([string]$Architecture, [string]$BuildRoot, [string]$
             if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
         }
         if ($Architecture -eq "x64") {
-            cmake --build . --config $Configuration --target third_party/OpenCC/data/Dictionaries
+            cmake --build . --config $Configuration --parallel --target third_party/OpenCC/data/Dictionaries
         }
-        cmake --build . --config $Configuration --target McBopomofoTIP McBopomofoServer McBopomofoConfig
+        cmake --build . --config $Configuration --parallel --target McBopomofoTIP McBopomofoServer McBopomofoConfig
         if ($LASTEXITCODE -ne 0) { throw "CMake build failed" }
     } finally { Pop-Location }
 }
