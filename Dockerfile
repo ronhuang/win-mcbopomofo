@@ -192,6 +192,10 @@ RUN $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; \
     wix --version; \
     Write-Host '--- All prerequisites verified ---'
 
+# Mark C:\src as safe for Git to avoid "dubious ownership" errors
+# with Docker volume mounts (host user != ContainerAdministrator)
+RUN git config --global --add safe.directory C:\src
+
 WORKDIR C:\\src
 
 CMD ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass"]
