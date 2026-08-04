@@ -21,12 +21,14 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 // OTHER DEALINGS IN THE SOFTWARE.
 
+// clang-format off
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <uxtheme.h>
+// clang-format on
 
 #include <algorithm>
 #include <array>
@@ -197,8 +199,7 @@ void CacheChildBaseRects(HWND hwnd) {
     rect.right = bottomRight.x;
     rect.bottom = bottomRight.y + g_ScrollPos;
     g_ChildBaseRects.emplace_back(child, rect);
-    g_ContentHeight =
-        std::max(g_ContentHeight, static_cast<int>(rect.bottom));
+    g_ContentHeight = std::max(g_ContentHeight, static_cast<int>(rect.bottom));
   }
   g_ContentHeight += 20;
 }
@@ -215,9 +216,8 @@ void ReflowChildControls(int scrollPos) {
     }
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
-    hdwp = DeferWindowPos(hdwp, child, nullptr, rect.left,
-                          rect.top - scrollPos, width, height,
-                          SWP_NOZORDER | SWP_NOACTIVATE);
+    hdwp = DeferWindowPos(hdwp, child, nullptr, rect.left, rect.top - scrollPos,
+                          width, height, SWP_NOZORDER | SWP_NOACTIVATE);
     if (!hdwp) {
       return;
     }
@@ -501,11 +501,13 @@ void LocalizeControls(HWND hwnd) {
 
 void InitializeComboContents() {
   for (const auto id : kInputModeLabels) {
-    AddComboString(hModeCombo, LoadLocalizedStringW(GetModuleHandle(nullptr), id).c_str());
+    AddComboString(hModeCombo,
+                   LoadLocalizedStringW(GetModuleHandle(nullptr), id).c_str());
   }
   for (const auto& option : kLayoutOptions) {
-    AddComboString(hLayoutCombo,
-                   LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
+    AddComboString(
+        hLayoutCombo,
+        LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
   }
   for (const auto& option : kCandidateKeyOptions) {
     std::wstring ws(option.value, option.value + strlen(option.value));
@@ -517,8 +519,9 @@ void InitializeComboContents() {
     AddComboString(hCandidateKeysCountCombo, text);
   }
   for (const auto& option : kSelectionActionOptions) {
-    AddComboString(hSelectionActionCombo,
-                   LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
+    AddComboString(
+        hSelectionActionCombo,
+        LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
   }
   for (int fontSize : kCandidateFontSizes) {
     wchar_t text[4] = {};
@@ -526,8 +529,9 @@ void InitializeComboContents() {
     AddComboString(hCandidateFontSizeCombo, text);
   }
   for (const auto& option : kCtrlEnterOptions) {
-    AddComboString(hCtrlEnterCombo,
-                   LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
+    AddComboString(
+        hCtrlEnterCombo,
+        LoadLocalizedStringW(GetModuleHandle(nullptr), option.labelId).c_str());
   }
 }
 
@@ -731,7 +735,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
   HANDLE hSingleInstanceMutex =
       CreateMutexW(nullptr, TRUE, kSingleInstanceMutexName);
   if (hSingleInstanceMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
-    std::wstring windowTitle = LoadLocalizedStringW(hInstance, IDS_CONFIG_TITLE);
+    std::wstring windowTitle =
+        LoadLocalizedStringW(hInstance, IDS_CONFIG_TITLE);
     HWND existingWindow = FindWindowW(L"#32770", windowTitle.c_str());
     if (existingWindow) {
       ShowWindow(existingWindow, SW_RESTORE);
